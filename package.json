@@ -1,0 +1,13 @@
+{
+  "name": "headcount-hq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted, single-tenant (extension-ready) headcount modeling tool. Zero runtime dependencies — runs on Node's built-in modules.",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --experimental-sqlite src/server.js",
+    "migrate": "node --experimental-sqlite src/db/migrate.js",
+    "test": "node --experimental-sqlite --test"
+  }
+}

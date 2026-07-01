@@ -1,0 +1,19 @@
+# Render blueprint. In Render: New + → Blueprint → connect this GitHub repo.
+# Render reads this file and provisions the service automatically.
+services:
+  - type: web
+    name: headcount-hq
+    runtime: docker
+    plan: starter            # a paid plan is required for the persistent disk below
+    healthCheckPath: /health
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true  # Render generates a strong secret for you
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_PATH
+        value: /data/headcount.sqlite
+    disk:
+      name: data             # persistent disk so the database survives redeploys
+      mountPath: /data
+      sizeGB: 1
