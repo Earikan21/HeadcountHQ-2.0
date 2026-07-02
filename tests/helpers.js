@@ -12,6 +12,14 @@ export async function startTestServer(envOverrides = {}) {
     SESSION_SECRET: "test-secret-0123456789abcdef",
     DATABASE_PATH: ":memory:",
     COOKIE_SECURE: "false",
+    // The Directive-4.0 feature flags default OFF in production (internal tool), but
+    // the retained code lives behind them. Tests exercise that retained code, so the
+    // harness enables every area by default; a test can pass FEATURE_*="false" in
+    // envOverrides to assert the hidden-by-default behavior.
+    FEATURE_ORG: "true",
+    FEATURE_PLANNING: "true",
+    FEATURE_REQUESTS: "true",
+    FEATURE_BENCHMARKS: "true",
     ...envOverrides,
   });
   const db = openDb(":memory:");

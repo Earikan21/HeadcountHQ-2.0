@@ -1,6 +1,7 @@
 import { html, raw } from "../html.js";
 import { renderPage, csrfField, money } from "../views/ui.js";
-import { requirePermission } from "../middleware.js";
+import { requirePermission, requireFeature } from "../middleware.js";
+import { featureEnabled } from "../features.js";
 import { canManageSettings } from "../authz.js";
 import { getSettings, updateSettings } from "../repos/settings.js";
 import { getDepartmentTargets, saveDepartmentTargets } from "../repos/targets.js";
@@ -35,8 +36,9 @@ export function registerPhilosophyRoutes(router) {
     ctx.redirect("/philosophy?msg=Philosophy+saved");
   });
 
-  // Apply phase suggestions to the scalar params
+  // Apply phase suggestions to the scalar params (benchmark-derived — flagged)
   router.post("/philosophy/apply-phase", (ctx) => {
+    if (!requireFeature(ctx, "benchmarks")) return;
     if (!requirePermission(ctx, canManageSettings)) return;
     const s = getSettings(ctx.db);
     const sug = P.phaseSuggestions(s.company_phase);
@@ -58,8 +60,9 @@ export function registerPhilosophyRoutes(router) {
     ctx.redirect("/philosophy?msg=Target+balance+saved");
   });
 
-  // Seed a suggested starting balance from the function benchmarks
+  // Seed a suggested starting balance from the function benchmarks (flagged)
   router.post("/philosophy/targets/suggest", (ctx) => {
+    if (!requireFeature(ctx, "benchmarks")) return;
     if (!requirePermission(ctx, canManageSettings)) return;
     const s = getSettings(ctx.db);
     const depts = listDepartments(ctx.db).map((d) => ({ name: d.name, category: d.function_category }));
@@ -103,6 +106,7 @@ function page(ctx) {
   }) : raw('<tr><td colspan="4" class="muted">Add departments (via the roster import) to set a target balance.</td></tr>');
 
   const providerLabel = PROVIDER_LABELS[ctx.config.AI_IMPORT_PROVIDER] || ctx.config.AI_IMPORT_PROVIDER;
+  const showBench = featureEnabled(ctx.config, "benchmarks");
 
   const body = html`
     <div class="pagehead">
@@ -155,7 +159,7 @@ function page(ctx) {
         </fieldset>
       </section>
 
-      <section class="card">
+      ${showBench ? html`<section class="card">
         <h2>Company phase &amp; industry</h2>
         <div class="formgrid">
           <label>Company phase
@@ -169,7 +173,7 @@ function page(ctx) {
             </select>
           </label>
         </div>
-      </section>
+      </section>` : ""}
 
       <section class="card">
         <h2>AI features <span class="hint">optional</span></h2>
@@ -201,16 +205,16 @@ function page(ctx) {
       <button class="btn" type="submit">Save philosophy</button>
     </form>
 
-    <form method="post" action="/philosophy/apply-phase" class="inline" style="margin-left:8px">
+    ${showBench ? html`<form method="post" action="/philosophy/apply-phase" class="inline" style="margin-left:8px">
       ${csrfField(ctx)}<button class="btn ghost" type="submit">Apply ${s.company_phase}-phase suggestions to org shape &amp; cost</button>
-    </form>
+    </form>` : ""}
 
     <section class="card" style="margin-top:18px">
       <div class="row-between">
         <div><h2>Target balance (you control this directly)</h2>
-          <p class="muted small">Each department's intended share of headcount. Edit any value; "Suggest a starting balance" seeds research-based defaults for your <b>phase &amp; industry</b> that you can then override. Targets sum: <b>${Math.round(targetSum * 10) / 10}%</b>.</p>
+          <p class="muted small">Each department's intended share of headcount. Edit any value directly.${showBench ? raw(' &ldquo;Suggest a starting balance&rdquo; seeds research-based defaults for your <b>phase &amp; industry</b> that you can then override.') : ""} Targets sum: <b>${Math.round(targetSum * 10) / 10}%</b>.</p>
         </div>
-        ${depts.length ? html`<form method="post" action="/philosophy/targets/suggest" class="inline">
+        ${showBench && depts.length ? html`<form method="post" action="/philosophy/targets/suggest" class="inline">
           ${csrfField(ctx)}<button class="btn ghost sm" type="submit">Suggest a starting balance</button>
         </form>` : ""}
       </div>

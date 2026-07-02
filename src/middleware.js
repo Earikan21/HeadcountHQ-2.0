@@ -1,4 +1,19 @@
 /** Small request guards shared across routes. */
+import { featureEnabled } from "./features.js";
+
+/**
+ * Ensure a feature flag is enabled; otherwise 404 (a hidden feature should be
+ * indistinguishable from a non-existent page). Returns true if OK. Used for
+ * sub-routes of an otherwise-registered area (e.g. benchmark actions inside
+ * Philosophy). Whole hidden areas are simply not registered — see routes.js.
+ */
+export function requireFeature(ctx, key) {
+  if (featureEnabled(ctx.config, key)) return true;
+  ctx.send(404, "text/html; charset=utf-8",
+    "<!doctype html><meta charset=utf-8><title>Not found</title><p style='font-family:sans-serif;padding:40px'>Page not found. <a href='/'>Home</a></p>");
+  return false;
+}
+
 export function clientIp(req) {
   const xff = req.headers["x-forwarded-for"];
   if (xff) return String(xff).split(",")[0].trim();

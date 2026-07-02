@@ -22,20 +22,28 @@ export const moneyShort = (n) => {
 export const moneyRange = (a, b) =>
   a == null && b == null ? "—" : `${money(a)} – ${money(b)}`;
 
-/** Grouped navigation appropriate to the current user. */
-function navGroups(user, active) {
+/**
+ * The consolidated dashboard surface (Directive 4.0): Dashboard, Roster,
+ * Headcount, and Departments are one surface, unified by the sub-tab bar below.
+ */
+const CONSOLIDATED = new Set(["dashboard", "roster", "headcount", "departments"]);
+
+/** Grouped navigation appropriate to the current user + enabled features. */
+function navGroups(user, active, features = {}) {
   if (!user) return [];
   const I = (href, label, key) => ({ href, label, on: active === key });
-  const overview = [I("/", "Dashboard", "dashboard")];
-  if (canViewCompTotals(user)) overview.push(I("/assistant", "Assistant", "assistant"));
-  const groups = [{ label: "Overview", items: overview }];
 
-  const people = [I("/roster", "Roster", "roster"), I("/headcount", "Headcount", "headcount"), I("/org", "Org chart", "org"), I("/requests", "Requests", "requests")];
-  if (user.role === "finance_admin") people.push(I("/departments", "Departments", "departments"));
-  groups.push({ label: "People", items: people });
+  // One consolidated group for the merged dashboard surface.
+  const dash = [I("/", "Dashboard", "dashboard"), I("/roster", "Roster", "roster"), I("/headcount", "Headcount", "headcount")];
+  if (features.org) dash.push(I("/org", "Org chart", "org"));
+  if (features.requests) dash.push(I("/requests", "Requests", "requests"));
+  if (user.role === "finance_admin") dash.push(I("/departments", "Departments", "departments"));
+  if (canViewCompTotals(user)) dash.push(I("/assistant", "Assistant", "assistant"));
+  const groups = [{ label: "Dashboard", items: dash }];
 
   if (user.role !== "manager") {
-    const plan = [I("/budgets", "Budgets", "budgets"), I("/planning", "Planning", "planning")];
+    const plan = [I("/budgets", "Budgets", "budgets")];
+    if (features.planning) plan.push(I("/planning", "Planning", "planning"));
     if (user.role === "finance_admin") plan.push(I("/philosophy", "Philosophy", "philosophy"));
     groups.push({ label: "Planning", items: plan });
   }
@@ -43,11 +51,22 @@ function navGroups(user, active) {
   return groups;
 }
 
+/** The sub-tab bar that makes the merged pages read as one surface. */
+function dashboardTabs(user, active) {
+  if (!CONSOLIDATED.has(active)) return "";
+  const t = (href, label, key) => raw(`<a href="${href}" class="subtab ${active === key ? "on" : ""}">${esc(label)}</a>`);
+  const tabs = [t("/", "Overview", "dashboard"), t("/roster", "Roster", "roster"), t("/headcount", "Headcount", "headcount")];
+  if (user && user.role === "finance_admin") tabs.push(t("/departments", "Departments", "departments"));
+  return html`<nav class="subtabs" aria-label="Dashboard sections">${tabs}</nav>`;
+}
+
 /** Render a full page in the app shell (sidebar + content). `body` is trusted HTML. */
 export function renderPage(ctx, { title, body, active = "", flash = "" }) {
   const user = ctx.user;
   const flashMsg = flash || ctx.query.get("msg") || "";
-  const groups = navGroups(user, active);
+  const features = (ctx.config && ctx.config.features) || {};
+  const groups = navGroups(user, active, features);
+  const subtabs = dashboardTabs(user, active);
   const navHtml = groups.map((g) => html`<div class="nav-group">
       <div class="nav-group-label">${g.label}</div>
       ${g.items.map((it) => raw(`<a href="${it.href}" class="nav-link ${it.on ? "on" : ""}">${esc(it.label)}</a>`))}
@@ -77,6 +96,7 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
     <main class="content">
       <div class="wrap">
         ${flashMsg ? html`<div class="flash">${flashMsg}</div>` : ""}
+        ${subtabs}
         ${raw(body)}
       </div>
     </main>

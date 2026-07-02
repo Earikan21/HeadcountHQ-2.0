@@ -6,6 +6,7 @@
  * on a host you set real environment variables instead.
  */
 import { readFileSync, existsSync } from "node:fs";
+import { resolveFeatures } from "./features.js";
 
 /** Minimal .env parser: KEY=VALUE lines, # comments, optional surrounding quotes. */
 export function loadDotEnv(path = ".env", env = process.env) {
@@ -100,6 +101,9 @@ export function loadConfig(env = process.env) {
     AI_IMPORT_BASE_URL,
     AI_IMPORT_MODEL,
     aiImportConfigured: AI_IMPORT_API_KEY.length > 0,
+    // Feature flags (Directive 4.0). Hidden areas default OFF for the internal tool;
+    // re-enable per area with FEATURE_<AREA>=true. See src/features.js.
+    features: resolveFeatures(env),
   };
 }
 

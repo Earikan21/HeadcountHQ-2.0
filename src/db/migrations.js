@@ -437,4 +437,67 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    name: "2026_07_01_017_areas",
+    up(db) {
+      // Directive 3.0 (revised, 2026-07-01): a three-tier budget hierarchy.
+      //   company budget -> AREA envelopes (set by the Finance Manager)
+      //                   -> department envelopes (split by the area's manager).
+      // An AREA groups several departments and has exactly ONE manager; a person
+      // may manage several areas. This supersedes the M10 per-collaborator single
+      // pool: ownership + delegation now bind to the AREA, not to the user. The
+      // legacy collaborator_departments / delegated_budgets tables are left in
+      // place (migrations are append-only) but are no longer read.
+      db.exec(`
+        CREATE TABLE areas (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id    INTEGER NOT NULL DEFAULT 1,
+          name            TEXT NOT NULL,
+          manager_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_areas_manager ON areas(manager_user_id);
+
+        ALTER TABLE departments ADD COLUMN area_id INTEGER REFERENCES areas(id);
+        CREATE INDEX idx_dept_area ON departments(area_id);
+
+        CREATE TABLE area_budgets (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id     INTEGER NOT NULL DEFAULT 1,
+          area_id          INTEGER NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
+          period           TEXT NOT NULL DEFAULT 'current',
+          headcount_budget INTEGER NOT NULL DEFAULT 0,
+          money_budget     REAL NOT NULL DEFAULT 0,
+          set_by           INTEGER,
+          updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (workspace_id, area_id, period)
+        );
+
+        -- Whether an area manager's approval is FINAL (1) or the Finance Manager
+        -- must co-approve (0 = dual approval). Default: Finance co-approves.
+        ALTER TABLE workspace_settings ADD COLUMN area_manager_final INTEGER NOT NULL DEFAULT 0;
+      `);
+
+      // Backfill: carry any M10 collaborator ownership forward into areas so no
+      // data is lost. For each user that owned >=1 department, create an area they
+      // manage, move those departments under it, and copy their delegated pool to
+      // the area budget. (Fresh installs have nothing to migrate.)
+      const owners = db.prepare(
+        `SELECT DISTINCT cd.user_id AS uid, u.name AS uname
+           FROM collaborator_departments cd JOIN users u ON u.id = cd.user_id`
+      ).all();
+      const insArea = db.prepare("INSERT INTO areas (name, manager_user_id) VALUES (?, ?)");
+      const setDeptArea = db.prepare("UPDATE departments SET area_id = ? WHERE id = ?");
+      const getPool = db.prepare("SELECT headcount_budget, money_budget FROM delegated_budgets WHERE user_id = ? AND period='current'");
+      const insBudget = db.prepare("INSERT INTO area_budgets (area_id, period, headcount_budget, money_budget) VALUES (?, 'current', ?, ?)");
+      for (const o of owners) {
+        const areaId = insArea.run(`${o.uname}'s area`, o.uid).lastInsertRowid;
+        for (const d of db.prepare("SELECT department_id FROM collaborator_departments WHERE user_id = ?").all(o.uid)) {
+          setDeptArea.run(areaId, d.department_id);
+        }
+        const pool = getPool.get(o.uid);
+        if (pool) insBudget.run(areaId, pool.headcount_budget || 0, pool.money_budget || 0);
+      }
+    },
+  },
 ];

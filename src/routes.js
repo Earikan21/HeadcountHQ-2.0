@@ -16,7 +16,12 @@ import { registerAuditRoutes } from "./routes/audit.js";
 import { registerOrgRoutes } from "./routes/org.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 
-export function registerRoutes(router, _deps) {
+export function registerRoutes(router, deps = {}) {
+  // Feature flags decide which enterprise areas exist at all (Directive 4.0).
+  // A hidden area is never mounted, so any request to it hits the default 404 —
+  // the flag is thus a real route-level guard, not just a hidden nav link.
+  const features = deps.config?.features || {};
+
   router.get("/health", (ctx) => ctx.send(200, "text/plain; charset=utf-8", "Server healthy"));
   router.get("/health.json", (ctx) => ctx.json(200, { status: "ok", time: new Date().toISOString() }));
 
@@ -27,10 +32,12 @@ export function registerRoutes(router, _deps) {
   registerRosterRoutes(router);
   registerPhilosophyRoutes(router);
   registerSeatRoutes(router);
-  registerRequestRoutes(router);
   registerBudgetRoutes(router);
-  registerPlanningRoutes(router);
   registerAuditRoutes(router);
-  registerOrgRoutes(router);
   registerAssistantRoutes(router);
+
+  // Hidden-by-default areas (internal tool). Re-enable with FEATURE_<AREA>=true.
+  if (features.requests) registerRequestRoutes(router);
+  if (features.planning) registerPlanningRoutes(router);
+  if (features.org) registerOrgRoutes(router);
 }
