@@ -1,7 +1,7 @@
 import { html, raw, esc } from "../html.js";
 import { renderPage, csrfField, errorList, money } from "../views/ui.js";
 import { requireAuth, requirePermission } from "../middleware.js";
-import { canManageAccounts, ROLES, ROLE_LABELS } from "../authz.js";
+import { canManageAccounts, ROLES, ROLE_LABELS, displayRole } from "../authz.js";
 import {
   listUsers, getUserById, getUserByEmail, createUserWithPassword, createPendingUser,
   setUserStatus, setPassword,
@@ -17,6 +17,16 @@ import { randomBytes } from "node:crypto";
 
 const tempPassword = () => randomBytes(9).toString("base64url");
 
+// Role choices offered when creating an account. "client" is a virtual option
+// (Directive 4.0 M21): stored as a c_suite account flagged is_client, giving the
+// external client a clean, editable-budget view with no backend/admin surfaces.
+const ACCOUNT_ROLE_OPTIONS = [
+  ["finance_admin", ROLE_LABELS.finance_admin],
+  ["c_suite", ROLE_LABELS.c_suite],
+  ["manager", ROLE_LABELS.manager],
+  ["client", "Client — external, clean view"],
+];
+
 export function registerAccountRoutes(router) {
   router.get("/accounts", (ctx) => {
     if (!requirePermission(ctx, canManageAccounts)) return;
@@ -29,8 +39,11 @@ export function registerAccountRoutes(router) {
     const errors = [];
     if (!name.trim()) errors.push("Name is required.");
     if (!/.+@.+\..+/.test(email)) errors.push("A valid email is required.");
-    if (!ROLES.includes(role)) errors.push("Choose a role.");
-    const deptId = department_id ? Number(department_id) : null;
+    if (!ROLES.includes(role) && role !== "client") errors.push("Choose a role.");
+    const isClientRole = role === "client";
+    const clientFull = isClientRole && !!ctx.body.client_full;
+    const dbRole = isClientRole ? "c_suite" : role;
+    const deptId = isClientRole ? null : (department_id ? Number(department_id) : null);
     if (role === "manager" && !deptId) errors.push("Managers must be assigned a department.");
     if (getUserByEmail(ctx.db, email)) errors.push("A user with that email already exists.");
     if (errors.length) return ctx.html(400, accountsPage(ctx, { errors, form: ctx.body }));
@@ -38,13 +51,13 @@ export function registerAccountRoutes(router) {
     let banner;
     if (method === "password") {
       const pw = tempPassword();
-      const user = createUserWithPassword(ctx.db, { email, name, role, password: pw, departmentId: deptId, mustChange: true });
+      const user = createUserWithPassword(ctx.db, { email, name, role: dbRole, password: pw, departmentId: deptId, mustChange: true, isClient: isClientRole, clientFull });
       logAudit(ctx.db, { userId: ctx.user.id, action: "account.created", entity: "user", entityId: user.id, detail: { role, method: "password" } });
       banner = html`<div class="reveal"><b>Account created for ${esc(name)}.</b> Share this temporary password securely — it won't be shown again:
         <code>${pw}</code> They'll be asked to change it on first sign-in.</div>`;
     } else {
-      const user = createPendingUser(ctx.db, { email, name, role, departmentId: deptId });
-      const token = createInvite(ctx.db, { email, role, departmentId: deptId, createdBy: ctx.user.id });
+      const user = createPendingUser(ctx.db, { email, name, role: dbRole, departmentId: deptId, isClient: isClientRole, clientFull });
+      const token = createInvite(ctx.db, { email, role: dbRole, departmentId: deptId, createdBy: ctx.user.id });
       logAudit(ctx.db, { userId: ctx.user.id, action: "account.invited", entity: "user", entityId: user.id, detail: { role, method: "invite" } });
       const link = inviteLink(ctx, token);
       banner = html`<div class="reveal"><b>Invite created for ${esc(name)}.</b> Send them this link to set their password (valid 7 days):
@@ -154,7 +167,7 @@ function accountsPage(ctx, { errors, banner, form = {} }) {
     const poolLabel = (pool.headcount_budget || pool.money_budget) ? `${pool.headcount_budget} / ${money(pool.money_budget)}` : "-";
     return html`<tr>
       <td><b>${u.name}</b><div class="sub">${u.email}</div></td>
-      <td>${ROLE_LABELS[u.role] || u.role}</td>
+      <td>${displayRole(u)}</td>
       <td>${deptLabel}</td>
       <td>${poolLabel}</td>
       <td>${u.last_login_at ? "Active" : (u.password_hash ? "Active" : "Pending invite")} ${u.status === "disabled" ? raw('<span class="pill off">Disabled</span>') : ""}</td>
@@ -196,12 +209,13 @@ function accountsPage(ctx, { errors, banner, form = {} }) {
           <label>Role
             <select name="role" required>
               <option value="">Choose...</option>
-              ${ROLES.map((r) => html`<option value="${r}" ${form.role === r ? raw("selected") : ""}>${ROLE_LABELS[r]}</option>`)}
+              ${ACCOUNT_ROLE_OPTIONS.map(([r, lbl]) => html`<option value="${r}" ${form.role === r ? raw("selected") : ""}>${lbl}</option>`)}
             </select>
           </label>
           <label>Department <span class="hint">required for department owners; add more after creating</span>
             <select name="department_id"><option value="">-</option>${deptOptions}</select>
           </label>
+          <label class="radio"><input type="checkbox" name="client_full" ${form.role === undefined ? raw("checked") : (form.client_full ? raw("checked") : "")}> Full data view — show exact compensation (applies to the Client role)</label>
           <fieldset class="radios">
             <label class="radio"><input type="radio" name="method" value="invite" checked> Send an invite link (they set their own password)</label>
             <label class="radio"><input type="radio" name="method" value="password"> Set a temporary password now</label>

@@ -210,3 +210,52 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .subtab{padding:9px 14px;color:var(--muted);font-weight:500;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .subtab:hover{color:var(--ink);text-decoration:none}
 .subtab.on{color:var(--brand-ink);border-bottom-color:var(--brand);font-weight:600}
+
+/* Directive 4.0 — People view: per-department dropdowns */
+.deptcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden}
+.deptcard>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;font-weight:600}
+.deptcard>summary::-webkit-details-marker{display:none}
+.deptcard>summary:hover{background:var(--line-2)}
+.deptcard[open]>summary{border-bottom:1px solid var(--line)}
+.dd-name{font-size:14.5px;color:var(--ink)}
+.dd-stats{display:flex;gap:14px;align-items:center;font-weight:500}
+.dd-stat{color:var(--muted);font-size:12.5px}
+.dd-stat b{color:var(--ink);font-weight:700}
+.dd-stat.warn b{color:var(--amber)}
+.dd-body{padding:6px 18px 18px}
+.dd-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
+.dd-actions .inline{display:flex;gap:6px;align-items:center}
+.deptcard.adddept>summary{color:var(--brand-ink)}
+.mini{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:16px 0 6px}
+
+/* Directive 4.0 — welcome / setup screen */
+.wcard{display:flex;gap:16px;align-items:flex-start}
+.wcard.done{opacity:.85}
+.wstepno{flex:0 0 auto;width:34px;height:34px;border-radius:50%;background:var(--brand-soft);color:var(--brand-ink);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px}
+.wcard.done .wstepno{background:var(--green-soft);color:var(--green)}
+.wstepbody{flex:1}
+.wstepbody h2{margin:0 0 4px}
+
+/* Directive 4.0 — live in-app spreadsheet (financial model) */
+.sheet-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);background:var(--panel)}
+.sheet{border-collapse:collapse;width:100%;font-size:13px}
+.sheet th,.sheet td{border:1px solid var(--line-2);padding:8px 12px;white-space:nowrap}
+.sheet thead th{position:sticky;top:0;background:#fafbfd;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:right;font-weight:700}
+.sheet thead th.rowhead,.sheet .rowhead{text-align:left;font-weight:600;color:var(--ink);background:#fafbfd;position:sticky;left:0}
+.sheet td.num{text-align:right;font-variant-numeric:tabular-nums}
+.sheet tbody tr:nth-child(even) td{background:#fcfcfe}
+.sheet td.warn{color:var(--amber);font-weight:600} .sheet td.over{color:var(--red);font-weight:700}
+.sheet tfoot td{border-top:2px solid var(--line);background:#f4f6fb;font-weight:700}
+
+/* Directive 4.0 — headcount model band + monthly build grid */
+.hm-band{display:flex;align-items:center;gap:14px;background:#1e2a4a;color:#fff;border-radius:var(--radius);padding:14px 18px;margin-bottom:4px}
+.hm-logo{flex:0 0 auto;width:40px;height:40px;border-radius:8px;border:2px solid rgba(255,255,255,.55);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.hm-title{font-weight:800;letter-spacing:.06em;font-size:15px}
+.hm-sub{color:#c7d0e6;font-size:12px;margin-top:2px}
+.hm-actions{margin-left:auto}
+.sheet.model th.mc,.sheet.model td.mc{min-width:46px;text-align:center;padding:6px}
+.sheet.model td.mc.on{background:#dbe6fb;color:#1e3a8a;font-weight:600}
+.sheet.model td.st{color:var(--green);font-weight:600}
+.sheet .hm-section td{background:#1e2a4a;color:#fff;font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:11px}
+.sheet .hm-total td{background:#eef1fb;font-weight:800}
+.sheet.summary{width:auto;min-width:560px}

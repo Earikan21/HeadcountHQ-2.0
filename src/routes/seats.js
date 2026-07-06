@@ -17,29 +17,26 @@ const STATUS_PILL = {
 
 export function registerSeatRoutes(router) {
   router.get("/headcount", (ctx) => {
-    if (!requireAuth(ctx)) return;
-    const scope = { departmentId: departmentScope(ctx.user) };
-    const roll = headcountRollup(ctx.db, scope);
-    const seats = listSeats(ctx.db, scope);
-    ctx.html(200, page(ctx, { roll, seats }));
+    // Roster + Headcount merged into the consolidated People view (Directive 4.0).
+    ctx.redirect("/roster");
   });
 
   router.post("/seats/:id/vacate", (ctx) => {
     if (!requirePermission(ctx, canManageSeats)) return;
     vacateSeat(ctx.db, Number(ctx.params.id), getSettings(ctx.db), ctx.user.id);
-    ctx.redirect("/headcount?msg=Seat+vacated");
+    ctx.redirect("/roster?msg=Seat+vacated");
   });
   router.post("/seats/:id/reopen", (ctx) => {
     if (!requirePermission(ctx, canManageSeats)) return;
     const seat = getSeat(ctx.db, Number(ctx.params.id));
     if (seat && seat.status === "frozen") setSeatStatus(ctx.db, seat.id, "open", ctx.user.id);
-    ctx.redirect("/headcount?msg=Seat+re-approved");
+    ctx.redirect("/roster?msg=Seat+re-approved");
   });
   router.post("/seats/:id/close", (ctx) => {
     if (!requirePermission(ctx, canManageSeats)) return;
     const seat = getSeat(ctx.db, Number(ctx.params.id));
     if (seat && seat.status !== "closed") setSeatStatus(ctx.db, seat.id, "closed", ctx.user.id);
-    ctx.redirect("/headcount?msg=Seat+closed");
+    ctx.redirect("/roster?msg=Seat+closed");
   });
 }
 

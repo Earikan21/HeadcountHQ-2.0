@@ -30,17 +30,22 @@ export const canManageDepartments = (u) => isRole(u, "finance_admin");
 export const canManageSettings = (u) => isRole(u, "finance_admin");
 export const canManageSeats = (u) => isRole(u, "finance_admin");
 export const canImportRoster = (u) => isRole(u, "finance_admin");
-export const canSetBudgets = (u) => isRole(u, "finance_admin", "c_suite");
-export const canApproveRequests = (u) => isRole(u, "finance_admin", "c_suite");
+export const canSetBudgets = (u) => isRole(u, "finance_admin", "c_suite") && !isClient(u);
+/** Who may VIEW budgets (clients are read-only viewers). */
+export const canViewBudgets = (u) => isRole(u, "finance_admin", "c_suite");
+export const canApproveRequests = (u) => isRole(u, "finance_admin", "c_suite") && !isClient(u);
 export const canCreateRequest = (u) => isRole(u, "finance_admin", "manager");
-export const canRunScenarios = (u) => isRole(u, "finance_admin", "c_suite");
+export const canRunScenarios = (u) => isRole(u, "finance_admin", "c_suite") && !isClient(u);
 export const canViewAudit = (u) => isRole(u, "finance_admin");
 /** Who may see aggregate compensation totals (managers see headcount only). */
 export const canViewCompTotals = (u) => isRole(u, "finance_admin", "c_suite");
 
 /** 'exact' | 'bands' — how much compensation detail this user may see. */
 export function compVisibility(user) {
-  return isRole(user, "finance_admin") ? "exact" : "bands";
+  if (isRole(user, "finance_admin")) return "exact";
+  // A client flagged for the "full view" sees exact compensation for their own company.
+  if (isClient(user) && user.client_full) return "exact";
+  return "bands";
 }
 
 /** Can the user see every department, or only their own? */
@@ -65,3 +70,17 @@ export function canViewDepartment(user, departmentId) {
   if (scope === null) return true;
   return scope.map(Number).includes(Number(departmentId));
 }
+
+// ---- Directive 4.0 (M21): external client accounts ----
+/** An external client of the firm: a c_suite-level account flagged for a clean,
+ *  backend-free view. Sees their (single-instance) company data and edits budgets. */
+export const isClient = (u) => !!(u && u.is_client);
+
+/** Human label for a user's role, showing "Client" for flagged client accounts. */
+export function displayRole(user) {
+  if (isClient(user)) return "Client";
+  return (user && (ROLE_LABELS[user.role] || user.role)) || "";
+}
+
+/** The AI assistant is hidden from client accounts to keep their view clean. */
+export const canUseAssistant = (u) => canViewCompTotals(u);

@@ -4,7 +4,7 @@
  * goes through the auto-escaping `html` tag from ../html.js.
  */
 import { html, raw, esc } from "../html.js";
-import { ROLE_LABELS, canViewCompTotals } from "../authz.js";
+import { canViewCompTotals, canUseAssistant, displayRole } from "../authz.js";
 
 /** A hidden CSRF input bound to the request's double-submit token. */
 export function csrfField(ctx) {
@@ -34,15 +34,14 @@ function navGroups(user, active, features = {}) {
   const I = (href, label, key) => ({ href, label, on: active === key });
 
   // One consolidated group for the merged dashboard surface.
-  const dash = [I("/", "Dashboard", "dashboard"), I("/roster", "Roster", "roster"), I("/headcount", "Headcount", "headcount")];
+  const dash = [I("/", "Dashboard", "dashboard"), I("/roster", "People", "roster")];
   if (features.org) dash.push(I("/org", "Org chart", "org"));
   if (features.requests) dash.push(I("/requests", "Requests", "requests"));
-  if (user.role === "finance_admin") dash.push(I("/departments", "Departments", "departments"));
-  if (canViewCompTotals(user)) dash.push(I("/assistant", "Assistant", "assistant"));
+  if (canUseAssistant(user)) dash.push(I("/assistant", "Assistant", "assistant"));
   const groups = [{ label: "Dashboard", items: dash }];
 
   if (user.role !== "manager") {
-    const plan = [I("/budgets", "Budgets", "budgets")];
+    const plan = [I("/budgets", "Budgets", "budgets"), I("/model", "Financial model", "model")];
     if (features.planning) plan.push(I("/planning", "Planning", "planning"));
     if (user.role === "finance_admin") plan.push(I("/philosophy", "Philosophy", "philosophy"));
     groups.push({ label: "Planning", items: plan });
@@ -55,8 +54,7 @@ function navGroups(user, active, features = {}) {
 function dashboardTabs(user, active) {
   if (!CONSOLIDATED.has(active)) return "";
   const t = (href, label, key) => raw(`<a href="${href}" class="subtab ${active === key ? "on" : ""}">${esc(label)}</a>`);
-  const tabs = [t("/", "Overview", "dashboard"), t("/roster", "Roster", "roster"), t("/headcount", "Headcount", "headcount")];
-  if (user && user.role === "finance_admin") tabs.push(t("/departments", "Departments", "departments"));
+  const tabs = [t("/", "Overview", "dashboard"), t("/roster", "People", "roster")];
   return html`<nav class="subtabs" aria-label="Dashboard sections">${tabs}</nav>`;
 }
 
@@ -86,7 +84,7 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
       <a class="brand" href="/"><span class="logo">H</span> <span class="brand-name">Headcount HQ</span></a>
       <nav class="side-nav">${navHtml}</nav>
       <div class="side-user">
-        <div class="su-id"><span class="su-name">${user ? user.name : ""}</span><span class="su-role">${user ? (ROLE_LABELS[user.role] || user.role) : ""}</span></div>
+        <div class="su-id"><span class="su-name">${user ? user.name : ""}</span><span class="su-role">${user ? displayRole(user) : ""}</span></div>
         <div class="su-actions">
           <a href="/account">Settings</a>
           <form method="post" action="/logout" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">Sign out</button></form>

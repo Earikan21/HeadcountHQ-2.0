@@ -25,7 +25,7 @@ const STATUS_PILL = {
 const TYPE_LABEL = { net_new: "Net-new", backfill: "Backfill" };
 
 /** AI assistant available (configured + toggled on)? */
-const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured) && Boolean(getSettings(ctx.db).ai_assistant_enabled);
+const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured);
 
 /** A short "this dept is X% under/over target" note to ground a justification. */
 function deptTargetNote(db, deptId) {

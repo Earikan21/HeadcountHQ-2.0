@@ -19,22 +19,22 @@ export function listUsers(db) {
 }
 
 /** Create a user with a known password (e.g. the first owner, or admin-set temp). */
-export function createUserWithPassword(db, { email, name, role, password, departmentId = null, mustChange = false }) {
+export function createUserWithPassword(db, { email, name, role, password, departmentId = null, mustChange = false, isClient = false, clientFull = false }) {
   const { hash, salt } = hashPassword(password);
   const info = db.prepare(
-    `INSERT INTO users (email, name, role, password_hash, password_salt, department_id, must_change_password)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(String(email).trim().toLowerCase(), name, role, hash, salt, departmentId, mustChange ? 1 : 0);
+    `INSERT INTO users (email, name, role, password_hash, password_salt, department_id, must_change_password, is_client, client_full)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(String(email).trim().toLowerCase(), name, role, hash, salt, departmentId, mustChange ? 1 : 0, isClient ? 1 : 0, clientFull ? 1 : 0);
   if (departmentId != null) addDepartmentForUser(db, info.lastInsertRowid, departmentId);
   return getUserById(db, info.lastInsertRowid);
 }
 
 /** Create a user without a password yet (pending invite acceptance). */
-export function createPendingUser(db, { email, name, role, departmentId = null }) {
+export function createPendingUser(db, { email, name, role, departmentId = null, isClient = false, clientFull = false }) {
   const info = db.prepare(
-    `INSERT INTO users (email, name, role, department_id, status)
-     VALUES (?, ?, ?, ?, 'active')`
-  ).run(String(email).trim().toLowerCase(), name, role, departmentId);
+    `INSERT INTO users (email, name, role, department_id, status, is_client, client_full)
+     VALUES (?, ?, ?, ?, 'active', ?, ?)`
+  ).run(String(email).trim().toLowerCase(), name, role, departmentId, isClient ? 1 : 0, clientFull ? 1 : 0);
   if (departmentId != null) addDepartmentForUser(db, info.lastInsertRowid, departmentId);
   return getUserById(db, info.lastInsertRowid);
 }

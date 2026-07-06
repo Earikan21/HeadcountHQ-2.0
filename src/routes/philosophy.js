@@ -17,7 +17,7 @@ const PHASE_LABELS = {
 };
 
 const PROVIDER_LABELS = {
-  anthropic: "Anthropic (Claude)", openai: "OpenAI", gemini: "Google Gemini",
+  anthropic: "Anthropic (Claude)", openai: "OpenAI", gemini: "Google Gemini", groq: "Groq",
 };
 
 export function registerPhilosophyRoutes(router) {
@@ -189,7 +189,7 @@ function page(ctx) {
         <p class="muted small" style="margin-top:14px"><b>Headcount assistant.</b> Drafts hiring-request justifications, estimates a
         role's cost &amp; salary band, and answers questions about your plan with recommendations. Sends the relevant role /
         <b>aggregate</b> plan context (never individual salaries or names).</p>
-        <label class="radio"><input type="checkbox" name="ai_assistant_enabled" ${s.ai_assistant_enabled ? raw("checked") : ""} ${ctx.config.aiImportConfigured ? "" : raw("disabled")}> Enable the AI assistant</label>
+        <p class="muted small">${ctx.config.aiImportConfigured ? raw('The assistant is <b class="ok">on</b> automatically — a provider key is configured. Available to admins and clients.') : raw('The assistant turns <b class="off">on automatically</b> once a provider key is set on the server.')}</p>
 
         <div class="warnbox" style="margin-top:14px">
           <p class="small" style="margin:0 0 8px"><b>Advanced — AI full read.</b> For messy or non-tabular import files, this lets the AI read the

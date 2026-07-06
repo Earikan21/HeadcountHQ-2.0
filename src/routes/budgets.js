@@ -1,7 +1,7 @@
 import { html, raw } from "../html.js";
 import { renderPage, csrfField, money, moneyShort } from "../views/ui.js";
 import { requirePermission } from "../middleware.js";
-import { canSetBudgets } from "../authz.js";
+import { canSetBudgets, canViewBudgets } from "../authz.js";
 import {
   allReconciliation, getCompanyBudget,
   setCompanyHeadcount, setCompanyMoney, setEnvelopeHeadcount, setEnvelopeMoney,
@@ -9,6 +9,10 @@ import {
 import { expectedRange } from "../domain/budget.js";
 import { listDepartments } from "../repos/departments.js";
 import { getSettings } from "../repos/settings.js";
+import { toCsv } from "../domain/csv.js";
+import { financialModelPage } from "../views/model.js";
+import { buildHeadcountModel } from "../domain/model.js";
+import { listEmployees } from "../repos/roster.js";
 import { logAudit } from "../repos/audit.js";
 
 /** Money a department's headcount budget implies: current cost + midpoint of the
@@ -21,8 +25,18 @@ function impliedMoneyForDept(r) {
 }
 
 export function registerBudgetRoutes(router) {
+  // Live, in-app spreadsheet view of the financial model (read-only; admins + clients).
+  router.get("/model", (ctx) => {
+    if (!requirePermission(ctx, canViewBudgets)) return;
+    const employees = listEmployees(ctx.db, {});
+    const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
+    const startYear = new Date().getFullYear();
+    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, startYear, months: 24 });
+    ctx.html(200, financialModelPage(ctx, model));
+  });
+
   router.get("/budgets", (ctx) => {
-    if (!requirePermission(ctx, canSetBudgets)) return;
+    if (!requirePermission(ctx, canViewBudgets)) return;
     const mode = ctx.query.get("mode") === "money" ? "money" : "headcount";
     ctx.html(200, page(ctx, mode));
   });
@@ -50,6 +64,34 @@ export function registerBudgetRoutes(router) {
     logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.filled_from_headcount", entity: "budget_envelope", detail: { departments: applied } });
     ctx.redirect(`/budgets?mode=money&msg=Money+budgets+set+from+the+headcount+budget`);
   });
+
+  // Export the financial model as CSV — opens in Excel or Google Sheets (Directive 4.0 M25).
+  router.get("/budgets/export.csv", (ctx) => {
+    if (!requirePermission(ctx, canViewBudgets)) return;
+    const { rows, company, currentEmployees } = allReconciliation(ctx.db);
+    const cap = getCompanyBudget(ctx.db);
+    const COLS = ["department", "current_employees", "approved_positions", "headcount_budget", "open_budgeted", "committed_cost", "money_budget"];
+    const data = rows.map((r) => ({
+      department: r.name,
+      current_employees: r.currentEmployees,
+      approved_positions: r.positions.approved,
+      headcount_budget: r.effHeadcount,
+      open_budgeted: Math.max(0, r.effHeadcount - r.currentEmployees),
+      committed_cost: Math.round(r.money.committed || 0),
+      money_budget: Math.round(r.effMoney || 0),
+    }));
+    data.push({
+      department: "TOTAL (company)",
+      current_employees: currentEmployees,
+      approved_positions: company.positions.approved,
+      headcount_budget: cap.headcount,
+      open_budgeted: Math.max(0, (cap.headcount || 0) - currentEmployees),
+      committed_cost: Math.round(company.money.committed || 0),
+      money_budget: Math.round(cap.money || 0),
+    });
+    logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.exported", entity: "budget_envelope", detail: { rows: data.length } });
+    ctx.attachment("financial-model.csv", "text/csv; charset=utf-8", toCsv(COLS, data));
+  });
 }
 
 const bar = (used, budget, over) => {
@@ -71,6 +113,7 @@ function expectedText(addHeads, band) {
 }
 
 function page(ctx, mode) {
+  const editable = canSetBudgets(ctx.user);
   const settings = getSettings(ctx.db);
   const cap = getCompanyBudget(ctx.db);
   const { rows, allocation, company, currentEmployees } = allReconciliation(ctx.db);
@@ -78,9 +121,10 @@ function page(ctx, mode) {
 
   const head = html`
     <div class="pagehead"><h1>Budgets</h1>
-      <p class="muted">Top-down: set one company budget, then allocate it across departments — one number at a time. Current headcount and its cost already count toward what's allocated. Enforcement is <b>${settings.budget_enforcement}</b> (<a href="/philosophy">change</a>).</p>
+      <p class="muted">Top-down: set one company budget, then allocate it across departments — one number at a time. Current headcount and its cost already count toward what's allocated. Enforcement is <b>${settings.budget_enforcement}</b>.${editable ? raw(' (<a href="/philosophy">change</a>)') : ""}</p>
     </div>
-    ${tabs(mode)}`;
+    ${tabs(mode)}
+    <p style="margin:8px 0 0"><a class="btn ghost sm" href="/budgets/export.csv">Export financial model (CSV)</a> <span class="muted small">Opens in Excel or Google Sheets.</span></p>`;
 
   let body;
   if (mode === "headcount") {
@@ -95,7 +139,7 @@ function page(ctx, mode) {
             <td class="right">${r.positions.approved}${r.positions.pending ? html` <span class="muted">+${r.positions.pending}</span>` : ""}</td>
             <td>
               <input class="tcell" type="number" min="${r.currentEmployees}" step="1" name="hc_${r.id}" value="${r.effHeadcount}"
-                     data-current="${r.currentEmployees}" data-band-low="${band?.low || 0}" data-band-high="${band?.high || 0}" data-expected-target="exp_${r.id}">
+                     data-current="${r.currentEmployees}" data-band-low="${band?.low || 0}" data-band-high="${band?.high || 0}" data-expected-target="exp_${r.id}" ${editable ? "" : "readonly"}>
               <div class="exp ${add > 0 ? "on" : ""}" id="exp_${r.id}">${expectedText(add, band)}</div>
             </td>
             <td>${bar(r.positions.approved, r.effHeadcount, r.positions.over > 0)}</td>
@@ -106,7 +150,7 @@ function page(ctx, mode) {
         ${csrfField(ctx)}<input type="hidden" name="mode" value="headcount">
         <section class="card">
           <h2>Company headcount budget</h2>
-          <label>Total positions, company-wide<input type="number" min="0" step="1" name="company_headcount" value="${cap.headcount}" style="max-width:200px"></label>
+          <label>Total positions, company-wide<input type="number" min="0" step="1" name="company_headcount" value="${cap.headcount}" style="max-width:200px" ${editable ? "" : "readonly"}></label>
         </section>
         <div class="kpis">
           <div class="kpi"><div class="lbl">Current employees</div><div class="val">${currentEmployees}</div></div>
@@ -120,7 +164,7 @@ function page(ctx, mode) {
             <thead><tr><th>Department</th><th class="right">Current</th><th class="right">Approved</th><th>Allocated &amp; cost impact</th><th>Fill</th></tr></thead>
             <tbody>${deptRows}</tbody>
           </table>
-          ${noDepts ? html`<p class="muted">Add departments first.</p>` : html`<button class="btn" type="submit" style="margin-top:12px">Save headcount budget</button>`}
+          ${noDepts ? html`<p class="muted">Add departments first.</p>` : editable ? html`<button class="btn" type="submit" style="margin-top:12px">Save headcount budget</button>` : ""}
         </section>
       </form>
       <script src="/static/budgets.js" defer></script>`;
@@ -134,14 +178,14 @@ function page(ctx, mode) {
             <td><b>${r.name}</b></td>
             <td class="right">${money(r.money.committed)}${r.money.pending ? html` <span class="muted">+${money(r.money.pending)}</span>` : ""}</td>
             <td>
-              <input class="tcell wide" type="number" min="0" step="any" name="money_${r.id}" value="${r.effMoney}">
+              <input class="tcell wide" type="number" min="0" step="any" name="money_${r.id}" value="${r.effMoney}" ${editable ? "" : "readonly"}>
               ${implied ? html`<div class="exp on">headcount budget implies +${moneyShort(implied.low)}–${moneyShort(implied.high)}</div>` : ""}
             </td>
             <td>${bar(r.money.committed, r.effMoney, r.money.over > 0)}</td>
           </tr>`;
         });
     body = html`${head}
-      ${noDepts ? "" : html`<form method="post" action="/budgets/fill-from-headcount" class="inline" style="margin:0 0 14px">
+      ${noDepts || !editable ? "" : html`<form method="post" action="/budgets/fill-from-headcount" class="inline" style="margin:0 0 14px">
         ${csrfField(ctx)}<button class="btn ghost" type="submit">↳ Fill money budgets from the headcount budget</button>
         <span class="muted small" style="margin-left:8px">Sets each department's money budget to cover its budgeted positions (current cost + the implied cost of unfilled ones).</span>
       </form>`}
@@ -149,7 +193,7 @@ function page(ctx, mode) {
         ${csrfField(ctx)}<input type="hidden" name="mode" value="money">
         <section class="card">
           <h2>Company money budget</h2>
-          <label>Total annual, fully-loaded, company-wide<input type="number" min="0" step="any" name="company_money" value="${cap.money}" style="max-width:240px"></label>
+          <label>Total annual, fully-loaded, company-wide<input type="number" min="0" step="any" name="company_money" value="${cap.money}" style="max-width:240px" ${editable ? "" : "readonly"}></label>
         </section>
         <div class="kpis">
           <div class="kpi"><div class="lbl">Committed spend</div><div class="val">${money(company.money.committed)}</div></div>
@@ -162,7 +206,7 @@ function page(ctx, mode) {
             <thead><tr><th>Department</th><th class="right">Committed</th><th>Allocated</th><th>Spend</th></tr></thead>
             <tbody>${deptRows}</tbody>
           </table>
-          ${noDepts ? html`<p class="muted">Add departments first.</p>` : html`<button class="btn" type="submit" style="margin-top:12px">Save money budget</button>`}
+          ${noDepts ? html`<p class="muted">Add departments first.</p>` : editable ? html`<button class="btn" type="submit" style="margin-top:12px">Save money budget</button>` : ""}
         </section>
       </form>`;
   }

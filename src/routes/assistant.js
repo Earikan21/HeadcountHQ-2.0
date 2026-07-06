@@ -1,7 +1,7 @@
 import { html, raw, esc } from "../html.js";
 import { renderPage, csrfField, money } from "../views/ui.js";
 import { requirePermission } from "../middleware.js";
-import { canViewCompTotals } from "../authz.js";
+import { canUseAssistant } from "../authz.js";
 import { getSettings } from "../repos/settings.js";
 import { headcountRollup } from "../repos/seats.js";
 import { getDepartmentTargets } from "../repos/targets.js";
@@ -12,7 +12,7 @@ import { mixVsTarget } from "../domain/philosophy.js";
 import { clientFromConfig, answerQuestion } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
 
-const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured) && Boolean(getSettings(ctx.db).ai_assistant_enabled);
+const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured);
 
 /** Suggested starter prompts (each is its own form so it works without JS). */
 const QUICK = [
@@ -23,12 +23,12 @@ const QUICK = [
 
 export function registerAssistantRoutes(router) {
   router.get("/assistant", (ctx) => {
-    if (!requirePermission(ctx, canViewCompTotals)) return;
+    if (!requirePermission(ctx, canUseAssistant)) return;
     ctx.html(200, page(ctx, {}));
   });
 
   router.post("/assistant", async (ctx) => {
-    if (!requirePermission(ctx, canViewCompTotals)) return;
+    if (!requirePermission(ctx, canUseAssistant)) return;
     const question = String(ctx.body.question || "").trim();
     if (!question) return ctx.html(200, page(ctx, {}));
     if (!assistReady(ctx)) return ctx.html(200, page(ctx, { question, error: "The assistant is off. A Finance Admin can enable it under Philosophy." }));

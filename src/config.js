@@ -36,6 +36,7 @@ const DEFAULT_MODELS = {
   anthropic: "claude-haiku-4-5-20251001",
   openai: "gpt-4o-mini",
   gemini: "gemini-2.5-flash",
+  groq: "llama-3.3-70b-versatile",
 };
 
 /**
@@ -66,7 +67,7 @@ export function loadConfig(env = process.env) {
   //   - gemini              -> Google's free-tier API via its OpenAI-compatible endpoint
   //   - AI_IMPORT_BASE_URL  -> override the base URL for any OTHER OpenAI-compatible
   //                            provider (e.g. Groq, OpenRouter). Used with provider=openai.
-  const AI_IMPORT_PROVIDER = oneOf(env.AI_IMPORT_PROVIDER, ["anthropic", "openai", "gemini"], "anthropic");
+  const AI_IMPORT_PROVIDER = oneOf(env.AI_IMPORT_PROVIDER, ["anthropic", "openai", "gemini", "groq"], "anthropic");
   const AI_IMPORT_API_KEY = (env.AI_IMPORT_API_KEY || "").trim();
   const AI_IMPORT_BASE_URL = (env.AI_IMPORT_BASE_URL || "").trim();
   const AI_IMPORT_MODEL = (env.AI_IMPORT_MODEL || "").trim() ||

@@ -1,18 +1,29 @@
 import { html, raw } from "../html.js";
 import { renderPage, money } from "../views/ui.js";
-import { ROLE_LABELS, canViewCompTotals, departmentScope, canSeeAllDepartments } from "../authz.js";
+import { canViewCompTotals, departmentScope, canSeeAllDepartments, canManageSettings, displayRole, canImportRoster } from "../authz.js";
 import { countUsers } from "../repos/users.js";
 import { listDepartments } from "../repos/departments.js";
 import { headcountRollup, recentSeatAdds } from "../repos/seats.js";
-import { allReconciliation } from "../repos/budgets.js";
+import { allReconciliation, getCompanyBudget } from "../repos/budgets.js";
 import { getDepartmentTargets } from "../repos/targets.js";
 import { mixVsTarget } from "../domain/philosophy.js";
+import { welcomePage } from "../views/welcome.js";
 import { listRequests } from "../repos/requests.js";
 import { OPEN_STATUSES } from "../domain/requests.js";
 
 export function registerHomeRoutes(router) {
   router.get("/", (ctx) => {
     if (!ctx.user) return ctx.redirect(countUsers(ctx.db) === 0 ? "/setup" : "/login");
+    // First-run welcome (Directive 4.0): replace the empty "zeros" dashboard with a
+    // guided setup until the admin has imported a roster. Dismissable with ?home=1.
+    if (canImportRoster(ctx.user) && ctx.query.get("home") !== "1") {
+      const rosterDone = ctx.db.prepare("SELECT COUNT(*) AS n FROM seats").get().n > 0;
+      if (!rosterDone) {
+        const cap = getCompanyBudget(ctx.db);
+        const budgetDone = (cap.headcount || 0) > 0 || (cap.money || 0) > 0;
+        return ctx.html(200, welcomePage(ctx, { rosterDone, budgetDone }));
+      }
+    }
     const scope = departmentScope(ctx.user);
     const roll = headcountRollup(ctx.db, { departmentId: scope });
     const t = roll.totals;
@@ -33,7 +44,7 @@ export function registerHomeRoutes(router) {
     const body = html`
       <div class="pagehead">
         <h1>${greeting(ctx.user)}</h1>
-        <p class="muted">${ROLE_LABELS[ctx.user.role]} · ${roleNote(ctx.user.role)}</p>
+        <p class="muted">${displayRole(ctx.user)} · ${roleNote(ctx.user.role)}</p>
       </div>
       <div class="kpis">${kpis}</div>
       ${canSeeAllDepartments(ctx.user) ? adminPanels(ctx) : managerPanels(ctx, scope, roll, openReq)}
@@ -73,7 +84,7 @@ function adminPanels(ctx) {
           <thead><tr><th>Department</th><th class="right">HC</th><th class="right">Actual</th><th class="right">Target</th><th>Status</th></tr></thead>
           <tbody>${mixRows}</tbody>
         </table>
-        <p class="muted small"><a href="/philosophy">Edit the target balance →</a></p>
+        ${canManageSettings(ctx.user) ? raw('<p class="muted small"><a href="/philosophy">Edit the target balance →</a></p>') : ""}
       </section>
       <div>
         <section class="card">
@@ -101,7 +112,7 @@ function managerPanels(ctx, scope, roll, openReq) {
       <section class="card">
         <h2>${deptName}</h2>
         <p>Active headcount <b>${roll.totals.active}</b> · Open seats <b>${roll.totals.open}</b> · Approved <b>${roll.totals.approved}</b></p>
-        <p class="muted small"><a href="/headcount">View headcount →</a></p>
+        <p class="muted small"><a href="/roster">View people →</a></p>
       </section>
       <section class="card">
         <h2>Your open requests</h2>

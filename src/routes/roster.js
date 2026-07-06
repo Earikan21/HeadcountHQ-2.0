@@ -1,5 +1,6 @@
 import { html, raw, esc } from "../html.js";
 import { renderPage, csrfField, errorList, money } from "../views/ui.js";
+import { peoplePage } from "../views/people.js";
 import { requireAuth, requirePermission } from "../middleware.js";
 import { canImportRoster, compVisibility, canViewCompTotals, departmentScope } from "../authz.js";
 import { detectHeaderRow, matrixToRows, toCsv } from "../domain/csv.js";
@@ -11,7 +12,7 @@ import {
   setBatchHeaderRow, setBatchStatus, listBatches,
   upsertDepartmentByName, upsertEmployee, listEmployees, nextEmployeeId, getEmployeeByExtId,
 } from "../repos/roster.js";
-import { ensureSeatForEmployee, vacateSeat, fillSeat, getSeat } from "../repos/seats.js";
+import { ensureSeatForEmployee, vacateSeat, fillSeat, getSeat, headcountRollup, listSeats } from "../repos/seats.js";
 import { listDepartments, getDepartment, setDepartmentCategory } from "../repos/departments.js";
 import { getSettings } from "../repos/settings.js";
 import { loadedCost as loadedCostFn } from "../domain/philosophy.js";
@@ -36,7 +37,9 @@ export function registerRosterRoutes(router) {
     if (!requireAuth(ctx)) return;
     const scope = departmentScope(ctx.user);
     const employees = listEmployees(ctx.db, { departmentId: scope });
-    ctx.html(200, rosterPage(ctx, { employees }));
+    const roll = headcountRollup(ctx.db, { departmentId: scope });
+    const seats = listSeats(ctx.db, { departmentId: scope });
+    ctx.html(200, peoplePage(ctx, { employees, roll, seats }));
   });
 
   router.get("/roster/export.csv", (ctx) => {
@@ -293,74 +296,7 @@ export function registerRosterRoutes(router) {
 }
 
 // ============ views ============
-function deptRollup(employees) {
-  const by = {};
-  let hc = 0, cost = 0;
-  for (const e of employees) {
-    const d = e.department_name || "(none)";
-    by[d] = by[d] || { department: d, headcount: 0, annualCost: 0 };
-    by[d].headcount++; by[d].annualCost += e.annual_salary || 0;
-    hc++; cost += e.annual_salary || 0;
-  }
-  const departments = Object.values(by).sort((a, b) => b.annualCost - a.annualCost);
-  return { departments, totals: { headcount: hc, annualCost: cost, avgCost: hc ? Math.round(cost / hc) : 0 } };
-}
-
-function rosterPage(ctx, { employees }) {
-  const isAdmin = canImportRoster(ctx.user);
-  const showTotals = canViewCompTotals(ctx.user);
-  const roll = deptRollup(employees);
-
-  const kpis = [
-    kpi("Headcount", roll.totals.headcount),
-    kpi("Departments", roll.departments.length),
-  ];
-  if (showTotals) {
-    kpis.push(kpi("Total annual cost", money(roll.totals.annualCost)));
-    kpis.push(kpi("Avg / employee", money(roll.totals.avgCost)));
-  }
-
-  const empty = employees.length === 0;
-  const rows = employees.map((e) => html`<tr>
-      <td><b>${e.name}</b><div class="sub">${e.employee_ext_id}</div></td>
-      <td>${e.department_name || "—"}</td>
-      <td>${e.job_title || "—"}</td>
-      <td>${statusPill(e.employment_status)}</td>
-      <td class="right">${compCell(ctx.user, e.annual_salary)}</td>
-    </tr>`);
-
-  const deptRows = roll.departments.map((d) => html`<tr>
-      <td><b>${d.department}</b></td>
-      <td class="right">${d.headcount}</td>
-      ${showTotals ? html`<td class="right">${money(d.annualCost)}</td>` : ""}
-    </tr>`);
-
-  const body = html`
-    <div class="pagehead row-between">
-      <div><h1>Roster</h1><p class="muted">${isAdmin ? "Your current people and compensation." : (compVisibility(ctx.user) === "exact" ? "" : "Compensation is shown as bands.")} ${departmentScope(ctx.user) != null ? "You see your own department." : ""}</p></div>
-      ${isAdmin ? html`<div class="actions"><a class="btn" href="/roster/new">Add person</a> <a class="btn ghost" href="/roster/import">Import roster</a> <a class="btn ghost" href="/departments">Departments</a> <a class="btn ghost" href="/roster/export.csv">Export CSV</a></div>` : ""}
-    </div>
-    <div class="kpis">${kpis}</div>
-    ${empty
-      ? html`<div class="card"><p class="muted">No employees yet.${isAdmin ? html` Start by <a href="/roster/import">importing your roster</a>.` : ""}</p></div>`
-      : html`<div class="grid2">
-          <section class="card">
-            <h2>People</h2>
-            <table class="table">
-              <thead><tr><th>Name</th><th>Department</th><th>Title</th><th>Status</th><th class="right">${compVisibility(ctx.user) === "exact" ? "Annual" : "Band"}</th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </section>
-          <section class="card">
-            <h2>By department</h2>
-            <table class="table">
-              <thead><tr><th>Department</th><th class="right">HC</th>${showTotals ? raw("<th class='right'>Annual cost</th>") : ""}</tr></thead>
-              <tbody>${deptRows}</tbody>
-            </table>
-          </section>
-        </div>`}`;
-  return renderPage(ctx, { title: "Roster", body, active: "roster" });
-}
+// deptRollup + rosterPage moved to src/views/people.js (Directive 4.0 consolidation)
 
 function wizardSteps(active) {
   const steps = [["upload", "Upload"], ["map", "Map columns"], ["review", "Review & import"]];

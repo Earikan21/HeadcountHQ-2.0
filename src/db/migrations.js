@@ -500,4 +500,23 @@ export const MIGRATIONS = [
       }
     },
   },
+  {
+    name: "2026_07_02_018_client_flag",
+    up(db) {
+      // Directive 4.0 (M21): mark a user as an external CLIENT of the firm. Stored
+      // as a flag on a c_suite-level account: the client sees their (single-instance)
+      // company data and can edit budgets, but backend/admin surfaces (settings,
+      // accounts, audit, import, departments) stay finance_admin-only and the AI
+      // assistant is hidden, giving a clean view. Additive column — no table rebuild.
+      db.exec(`ALTER TABLE users ADD COLUMN is_client INTEGER NOT NULL DEFAULT 0;`);
+    },
+  },
+  {
+    name: "2026_07_02_019_client_full_view",
+    up(db) {
+      // Directive 4.0 (M21 revision): per-client "full view" flag. When set, the
+      // client sees exact compensation (not just bands); otherwise bands. Additive.
+      db.exec(`ALTER TABLE users ADD COLUMN client_full INTEGER NOT NULL DEFAULT 0;`);
+    },
+  },
 ];

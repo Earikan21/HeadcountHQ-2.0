@@ -174,9 +174,10 @@ const ENDPOINTS = {
   anthropic: "https://api.anthropic.com/v1/messages",
   openai: "https://api.openai.com/v1/chat/completions",
   gemini: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+  groq: "https://api.groq.com/openai/v1/chat/completions",
 };
 /** Providers that speak the OpenAI Chat Completions request/response shape. */
-const OPENAI_FORMAT = new Set(["openai", "gemini"]);
+const OPENAI_FORMAT = new Set(["openai", "gemini", "groq"]);
 
 export class LlmClient {
   /**
