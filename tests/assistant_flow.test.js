@@ -22,6 +22,8 @@ before(async () => {
       });
     } else if (user.includes("QUESTION:")) {
       text = "You have people across your departments.\nRecommendations:\n- Set a company budget to track runway.";
+    } else if (user.includes("Turn this into hires")) {
+      text = JSON.stringify({ hires: [{ department: "Sales", role: "AE", start_month: "2027-06", annual_salary: 120000, count: 2 }] });
     }
     return { ok: true, json: async () => ({ content: [{ type: "text", text }] }) };
   };
@@ -74,10 +76,27 @@ test("assistant tab answers and recommends", async () => {
   assert.match(body, /Set a company budget/);
 });
 
-test("assistant nav link shows for finance admin", async () => {
+test("floating assistant widget shows for finance admin", async () => {
   const c = await loginAda();
   const roster = await (await c.get("/roster")).text();
-  assert.match(roster, /href="\/assistant"/);
+  assert.match(roster, /id="ai-fab"/);
+});
+
+test("floating widget endpoint /assistant/ask returns a JSON answer", async () => {
+  const c = await loginAda();
+  const res = await c.post("/assistant/ask", { question: "How are we doing on headcount?" });
+  assert.match(res.headers.get("content-type"), /application\/json/);
+  const data = JSON.parse(await res.text());
+  assert.ok(data.answer && data.answer.length > 0, "should return an answer");
+});
+
+test("AI scenario models what-if hires on the financial model", async () => {
+  const c = await loginAda();
+  const res = await c.post("/model/ai-scenario", { description: "hire 2 AEs in Sales starting June 2027 at $120k" });
+  const page = await res.text();
+  assert.match(page, /Scenario hires/);
+  assert.match(page, /AI modeled/);
+  assert.match(page, /AE/);
 });
 
 test("managers cannot reach the assistant", async () => {
@@ -90,5 +109,5 @@ test("managers cannot reach the assistant", async () => {
   await mgr.post("/login", { email: "mo@acme.co", password: pw });
   assert.equal((await mgr.get("/assistant")).status, 403);
   const roster = await (await mgr.get("/roster")).text();
-  assert.ok(!roster.includes('href="/assistant"'), "manager nav must not show the assistant");
+  assert.ok(!roster.includes('id="ai-fab"'), "manager must not see the assistant widget");
 });

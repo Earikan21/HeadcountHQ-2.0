@@ -43,6 +43,20 @@ test("nav links to the live financial model", async () => {
   assert.match(home, /href="\/model"[^>]*>Financial model</);
 });
 
+test("zoom controls + scenario planning render on the model", async () => {
+  const page = await (await admin.get("/model")).text();
+  assert.match(page, /id="zoom-in"/);
+  assert.match(page, /\/static\/model\.js/);
+  assert.match(page, /Scenario planning/);
+});
+
+test("a manual scenario hire appears in a what-if band", async () => {
+  const res = await admin.post("/model", { scn_department: "Sales", scn_role: "AE", scn_start: "2027-06", scn_salary: "120000", scn_count: "2" });
+  const page = await res.text();
+  assert.match(page, /Scenario hires/);
+  assert.match(page, /AE/);
+});
+
 test("a client can view the live model too (read-only)", async () => {
   const res = await client.get("/model");
   assert.equal(res.status, 200);

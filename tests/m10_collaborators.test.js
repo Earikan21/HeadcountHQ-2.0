@@ -20,8 +20,8 @@ function addEmployee(db, ext, name, deptId) {
 const mgr = (db, email, deptId) =>
   createUserWithPassword(db, { email, name: email, role: "manager", password: PW, departmentId: deptId });
 
-test("Finance Admin role is now labelled 'Finance Manager'", () => {
-  assert.equal(ROLE_LABELS.finance_admin, "Finance Manager");
+test("Finance Admin role is labelled 'AZ Finance'", () => {
+  assert.equal(ROLE_LABELS.finance_admin, "AZ Finance");
 });
 
 test("creating a collaborator with a department populates the canonical join", () => {

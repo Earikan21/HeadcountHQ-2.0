@@ -15,7 +15,7 @@ async function makeAccount(role, email, extra = {}) {
   return cl;
 }
 before(async () => {
-  srv = await startTestServer();
+  srv = await startTestServer({ AI_IMPORT_API_KEY: "k", AI_IMPORT_PROVIDER: "groq" });
   owner = makeClient(srv.base);
   await owner.get("/setup");
   await owner.post("/setup", { name: "Firm Admin", email: "cfo@firm.co", password: "supersecret123" });
@@ -52,7 +52,7 @@ test("client nav: People + Budgets + Assistant, labeled Client, no backend chrom
   const home = await (await full.get("/")).text();
   assert.match(home, /href="\/roster"/);
   assert.match(home, /href="\/budgets"/);
-  assert.match(home, /href="\/assistant"/);   // ask-your-data now available
+  assert.match(home, /id="ai-fab"/);   // floating ask-your-data widget
   assert.match(home, />Client</);
   for (const re of [/href="\/philosophy"/, /href="\/accounts"/, /href="\/audit"/]) {
     assert.ok(!re.test(home), `client nav must not include ${re}`);
