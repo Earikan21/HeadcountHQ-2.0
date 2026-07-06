@@ -55,9 +55,8 @@ test("nav omits hidden areas but keeps the consolidated + kept areas", async () 
 test("the consolidated dashboard renders the sub-tab bar (one surface)", async () => {
   const home = await (await c.get("/")).text();
   assert.match(home, /class="subtabs"/);
-  assert.match(home, /class="subtab on"[^>]*>Overview|>Overview<\/a>/);
-  assert.match(home, /href="\/roster"[^>]*class="subtab|class="subtab[^"]*"[^>]*>Roster/);
-  assert.match(home, /href="\/departments"/);
+  assert.match(home, /class="subtab[^"]*"[^>]*>Overview/);
+  assert.match(home, /href="\/roster"[^>]*class="subtab[^"]*"[^>]*>People/);
 });
 
 test("benchmark endpoints 404 and the phase/industry surface is gone from Philosophy", async () => {

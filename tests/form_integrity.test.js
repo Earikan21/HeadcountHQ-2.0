@@ -29,7 +29,7 @@ function maxFormDepth(htmlStr) {
 }
 
 const PAGES = () => [
-  "/philosophy", `/departments/${deptId}`, "/roster", "/accounts", "/headcount",
+  "/philosophy", `/departments/${deptId}`, "/roster", "/accounts",
   `/roster/import/${batchId}/map`, `/roster/import/${batchId}/review`,
 ];
 

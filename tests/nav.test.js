@@ -11,9 +11,9 @@ before(async () => {
 });
 after(async () => { await srv.close(); });
 
-test("admin nav links to Departments (M2.75 entry point)", async () => {
+test("admin nav shows the consolidated People link", async () => {
   const home = await (await c.get("/")).text();
-  assert.match(home, /href="\/departments"[^>]*>Departments</);
+  assert.match(home, /href="\/roster"[^>]*>People</);
 });
 
 test("the Departments page renders the rename/merge/split tools via a managed dept", async () => {

@@ -51,8 +51,8 @@ test("import creates a filled seat per active employee; inactive gets none", asy
   assert.equal(roll.totals.active, 3);
   assert.equal(roll.totals.open, 0);
 
-  const page = await (await c.get("/headcount")).text();
-  assert.match(page, /Approved headcount/);
+  const page = await (await c.get("/roster")).text();
+  assert.match(page, /Active headcount/);
   assert.match(page, /Engineering/);
 });
 
@@ -99,7 +99,7 @@ test("managers can view headcount but not change settings or seats", async () =>
   const created = await admin2.post("/accounts", { name: "Mo", email: "mo@acme.co", role: "manager", department_id: String(engId), method: "password" });
   const pw = (await created.text()).match(/<code>([^<]+)<\/code>/)[1];
   const mgr = await login("mo@acme.co", pw);
-  assert.equal((await mgr.get("/headcount")).status, 200);
+  assert.equal((await mgr.get("/roster")).status, 200);
   assert.equal((await mgr.get("/philosophy")).status, 403);
   const anySeat = srv.db.prepare("SELECT id FROM seats LIMIT 1").get().id;
   assert.equal((await mgr.post(`/seats/${anySeat}/vacate`, {})).status, 403);
