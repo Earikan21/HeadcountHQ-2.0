@@ -31,7 +31,11 @@ export function registerPhilosophyRoutes(router) {
   // Core parameters
   router.post("/philosophy", (ctx) => {
     if (!requirePermission(ctx, canManageSettings)) return;
-    updateSettings(ctx.db, ctx.body, ctx.user.id);
+    // Some philosophy controls are hidden in the service-tool build — preserve their
+    // stored values so a save through the trimmed form does not reset them.
+    const cur = getSettings(ctx.db);
+    const preserved = { seat_mode: cur.seat_mode, backfill_policy: cur.backfill_policy, require_csuite_approval: cur.require_csuite_approval, target_span_of_control: cur.target_span_of_control, max_layers: cur.max_layers, company_phase: cur.company_phase, industry: cur.industry };
+    updateSettings(ctx.db, { ...preserved, ...ctx.body }, ctx.user.id);
     logAudit(ctx.db, { userId: ctx.user.id, action: "philosophy.updated", entity: "workspace_settings", entityId: 1 });
     ctx.redirect("/philosophy?msg=Philosophy+saved");
   });
@@ -119,30 +123,12 @@ function page(ctx) {
     <form method="post" action="/philosophy">
       ${csrfField(ctx)}
       <section class="card">
-        <h2>Unit of approval &amp; backfill</h2>
+        <h2>Budget enforcement</h2>
+        <p class="muted small" style="margin:0 0 4px">When a hiring plan would exceed a department's budget:</p>
         <fieldset class="radios">
-          ${radio("seat_mode", "seat", s.seat_mode, "<b>Seat</b> — the position persists when someone leaves, ready to backfill.")}
-          ${radio("seat_mode", "person", s.seat_mode, "<b>Person</b> — when someone leaves, the headcount dissolves; re-staffing needs a new approval.")}
+          ${radio("budget_enforcement", "soft", s.budget_enforcement, "<b>Soft</b> — allow it, but flag the gap for the approver.")}
+          ${radio("budget_enforcement", "hard", s.budget_enforcement, "<b>Hard</b> — block plans that push a department over budget; raise the cap first.")}
         </fieldset>
-        <fieldset class="radios">
-          ${radio("backfill_policy", "auto", s.backfill_policy, "<b>Auto-backfill</b> a vacated seat (reopens as a req).")}
-          ${radio("backfill_policy", "reapprove", s.backfill_policy, "<b>Require re-approval</b> — vacated seat freezes to the budget pool.")}
-        </fieldset>
-        <label class="radio"><input type="checkbox" name="require_csuite_approval" ${s.require_csuite_approval ? raw("checked") : ""}> New seats require C-suite approval</label>
-        <p class="muted small" style="margin:12px 0 4px">When a hiring request would exceed a department's budget:</p>
-        <fieldset class="radios">
-          ${radio("budget_enforcement", "soft", s.budget_enforcement, "<b>Soft</b> — allow it, but flag the gap for the approver (bottom-up meets top-down).")}
-          ${radio("budget_enforcement", "hard", s.budget_enforcement, "<b>Hard</b> — block approvals that push a department over budget; the cap must be raised first.")}
-        </fieldset>
-      </section>
-
-      <section class="card">
-        <h2>Org shape</h2>
-        <p class="muted small">Research: healthy span is ~5–10 (wider for standardized work); most orgs run 5–7 layers, &gt;8 is a red flag.</p>
-        <div class="formgrid">
-          ${num("target_span_of_control", "Target span of control", s.target_span_of_control, 'min="1" max="20" step="1"', "direct reports / manager")}
-          ${num("max_layers", "Max management layers", s.max_layers, 'min="1" max="12" step="1"', "CEO → frontline")}
-        </div>
       </section>
 
       <section class="card">

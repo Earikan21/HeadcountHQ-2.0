@@ -22,9 +22,7 @@ const tempPassword = () => randomBytes(9).toString("base64url");
 // external client a clean, editable-budget view with no backend/admin surfaces.
 const ACCOUNT_ROLE_OPTIONS = [
   ["finance_admin", ROLE_LABELS.finance_admin],
-  ["c_suite", ROLE_LABELS.c_suite],
-  ["manager", ROLE_LABELS.manager],
-  ["client", "Client — external, clean view"],
+  ["client", "Client — view-only"],
 ];
 
 export function registerAccountRoutes(router) {
@@ -211,9 +209,6 @@ function accountsPage(ctx, { errors, banner, form = {} }) {
               <option value="">Choose...</option>
               ${ACCOUNT_ROLE_OPTIONS.map(([r, lbl]) => html`<option value="${r}" ${form.role === r ? raw("selected") : ""}>${lbl}</option>`)}
             </select>
-          </label>
-          <label>Department <span class="hint">required for department owners; add more after creating</span>
-            <select name="department_id"><option value="">-</option>${deptOptions}</select>
           </label>
           <label class="radio"><input type="checkbox" name="client_full" ${form.role === undefined ? raw("checked") : (form.client_full ? raw("checked") : "")}> Full data view — show exact compensation (applies to the Client role)</label>
           <fieldset class="radios">

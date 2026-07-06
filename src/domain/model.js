@@ -40,12 +40,30 @@ export function monthColumns(startYear, months = 24) {
  * @param {number} o.startYear window start year (window is Jan of startYear)
  * @param {number} [o.months] window length (default 24)
  */
-export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, startYear, months = 24 } = {}) {
+/** Expand scenario hires ({department, role, start_month, annual_salary, count}) into
+ *  synthetic employee rows flagged _scenario, so the model can show a what-if. */
+export function scenarioEmployees(scenarioHires = []) {
+  const out = [];
+  for (const h of scenarioHires || []) {
+    const count = Math.max(1, Math.min(200, Number(h.count) || 1));
+    const start = h.start_month ? (String(h.start_month).length === 7 ? h.start_month + "-01" : String(h.start_month)) : null;
+    for (let i = 0; i < count; i++) {
+      out.push({
+        name: h.role || "Scenario hire", job_title: h.role || "Scenario hire",
+        department_name: h.department || "(scenario)", annual_salary: Number(h.annual_salary) || 0,
+        start_date: start, employment_status: "active", _scenario: true,
+      });
+    }
+  }
+  return out;
+}
+
+export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, startYear, months = 24, scenarioHires = [] } = {}) {
   const cols = monthColumns(startYear, months);
   const mult = Number(loadedMultiplier) > 0 ? Number(loadedMultiplier) : 1;
   const benefitsPct = Math.round((mult - 1) * 1000) / 10;
 
-  const roster = employees.map((e) => {
+  const roster = employees.concat(scenarioEmployees(scenarioHires)).map((e) => {
     const annual = Number(e.annual_salary) || 0;
     const monthlyBase = annual / 12;
     const loadedMonthly = monthlyBase * mult;
@@ -61,6 +79,7 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
       annualBase: annual, monthlyBase, monthlyBenefits, loadedMonthly,
       hireMonthLabel: hireIdx > 0 && hireIdx < months ? cols[hireIdx].fullLabel : (hireIdx <= 0 ? "From start" : "After window"),
       startDate: e.start_date || "",
+      scenario: !!e._scenario,
       active, monthlyCost,
     };
   });

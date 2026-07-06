@@ -27,6 +27,23 @@ export function registerAssistantRoutes(router) {
     ctx.html(200, page(ctx, {}));
   });
 
+  // JSON endpoint powering the floating assistant widget (Directive 4.0).
+  router.post("/assistant/ask", async (ctx) => {
+    if (!requirePermission(ctx, canUseAssistant)) return;
+    const q = String(ctx.body.question || "").trim();
+    if (!q) return ctx.json(200, { error: "Type a question first." });
+    if (!assistReady(ctx)) return ctx.json(200, { error: "The assistant isn't configured yet — a provider key must be set on the server." });
+    try {
+      const client = clientFromConfig(ctx.config);
+      const answer = await answerQuestion({ question: q, context: buildAssistantContext(ctx.db), client });
+      logAudit(ctx.db, { userId: ctx.user.id, action: "assistant.asked", entity: "assistant", detail: { chars: q.length } });
+      return ctx.json(200, { answer });
+    } catch (e) {
+      console.error(`[assistant] ask failed: ${e && e.message ? e.message : e}`);
+      return ctx.json(200, { error: "The assistant couldn't answer just now — please try again." });
+    }
+  });
+
   router.post("/assistant", async (ctx) => {
     if (!requirePermission(ctx, canUseAssistant)) return;
     const question = String(ctx.body.question || "").trim();

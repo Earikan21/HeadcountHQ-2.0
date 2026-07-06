@@ -15,7 +15,7 @@ export const ROLES = ["finance_admin", "c_suite", "manager"];
 // "Finance Manager" per Directive 3.0 -- renaming the key would be a risky table
 // rebuild for zero user-visible benefit.
 export const ROLE_LABELS = {
-  finance_admin: "Finance Manager",
+  finance_admin: "AZ Finance",
   c_suite: "C-Suite",
   manager: "Department Manager",
 };

@@ -95,3 +95,36 @@ export async function answerQuestion({ question, context, client }) {
   const user = `DATA:\n${str(context, 6000)}\n\nQUESTION: ${str(question, 500)}`;
   return client.chat(system, user, 700);
 }
+
+/**
+ * Parse a plain-English hiring what-if into structured scenario hires.
+ * @returns {Promise<Array<{department:string,role:string,start_month:string|null,annual_salary:number,count:number}>>}
+ */
+export async function parseScenarioHires({ description, departments = [], client }) {
+  if (!client || !client.configured) throw new Error("Assistant not configured.");
+  const system =
+    "You convert a hiring what-if described in plain English into structured hires. " +
+    "Respond with a SINGLE JSON object of the form " +
+    '{"hires":[{"department":"","role":"","start_month":"YYYY-MM","annual_salary":0,"count":1}]} ' +
+    "and nothing else (no prose, no markdown).";
+  const user =
+`Known departments: ${departments.join(", ") || "(none)"}
+
+Turn this into hires: ${str(description, 500)}
+
+Rules:
+- start_month must be "YYYY-MM" (or null if unspecified).
+- annual_salary is a plain number (no $ or commas).
+- count is an integer (default 1).
+- Prefer an existing department name when the text clearly matches one.`;
+  const text = await client.chat(system, user, 600);
+  const obj = parseJsonObject(text);
+  const hires = Array.isArray(obj.hires) ? obj.hires : [];
+  return hires.map((h) => ({
+    department: String(h.department || "").slice(0, 60).trim() || "(scenario)",
+    role: String(h.role || "Scenario hire").slice(0, 60).trim(),
+    start_month: /^\d{4}-\d{2}$/.test(String(h.start_month || "")) ? h.start_month : null,
+    annual_salary: Number(h.annual_salary) || 0,
+    count: Math.max(1, Math.min(200, Number(h.count) || 1)),
+  })).filter((h) => h.annual_salary > 0);
+}

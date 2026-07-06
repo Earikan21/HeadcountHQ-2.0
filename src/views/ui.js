@@ -37,7 +37,6 @@ function navGroups(user, active, features = {}) {
   const dash = [I("/", "Dashboard", "dashboard"), I("/roster", "People", "roster")];
   if (features.org) dash.push(I("/org", "Org chart", "org"));
   if (features.requests) dash.push(I("/requests", "Requests", "requests"));
-  if (canUseAssistant(user)) dash.push(I("/assistant", "Assistant", "assistant"));
   const groups = [{ label: "Dashboard", items: dash }];
 
   if (user.role !== "manager") {
@@ -65,6 +64,7 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
   const features = (ctx.config && ctx.config.features) || {};
   const groups = navGroups(user, active, features);
   const subtabs = dashboardTabs(user, active);
+  const showAssistant = !!(user && canUseAssistant(user) && ctx.config && ctx.config.aiImportConfigured);
   const navHtml = groups.map((g) => html`<div class="nav-group">
       <div class="nav-group-label">${g.label}</div>
       ${g.items.map((it) => raw(`<a href="${it.href}" class="nav-link ${it.on ? "on" : ""}">${esc(it.label)}</a>`))}
@@ -99,8 +99,26 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
       </div>
     </main>
   </div>
+  ${showAssistant ? assistantWidget(ctx) : ""}
 </body>
 </html>`;
+}
+
+/** Floating "Ask AI" assistant widget (Directive 4.0) — shown on every page for
+ *  users who may use the assistant, once a provider key is configured. */
+function assistantWidget(ctx) {
+  return html`
+  <button id="ai-fab" class="ai-fab" type="button" aria-label="Ask the assistant">Ask AI</button>
+  <section id="ai-panel" class="ai-panel" hidden aria-label="Assistant">
+    <header class="ai-head"><b>Assistant</b><button id="ai-close" class="ai-x" type="button" aria-label="Close">&times;</button></header>
+    <div id="ai-log" class="ai-log"><p class="muted small">Ask about your headcount, budget, and plan. Aggregate figures only — never individual names or salaries.</p></div>
+    <form id="ai-form" class="ai-form">
+      <input type="hidden" id="ai-csrf" value="${ctx.csrf}">
+      <textarea id="ai-q" rows="2" placeholder="e.g. Are we over-invested in any function?"></textarea>
+      <button class="btn sm" type="submit">Ask</button>
+    </form>
+  </section>
+  <script src="/static/assistant.js" defer></script>`;
 }
 
 /** A standalone (no-nav) page for login / setup / invite screens. */
