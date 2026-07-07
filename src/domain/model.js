@@ -69,32 +69,50 @@ export function scenarioEmployees(scenarioHires = []) {
   return out;
 }
 
+/** Resolve effective drivers for a department: per-department override, else the
+ *  plan-global value, else the default. */
+export function resolveAssumptions(assumptions, dept, fallbackMult) {
+  const g = assumptions || {};
+  const d = (g.byDept && g.byDept[dept]) || {};
+  const pick = (k, dflt) => (d[k] != null && d[k] !== "" ? Number(d[k]) : (g[k] != null && g[k] !== "" ? Number(g[k]) : dflt));
+  const mult = Number(d.loadedMultiplier) > 0 ? Number(d.loadedMultiplier)
+    : (Number(g.loadedMultiplier) > 0 ? Number(g.loadedMultiplier) : (fallbackMult || 1));
+  return {
+    mult,
+    growth: pick("salaryGrowthPct", 0),
+    bonus: 1 + pick("bonusPct", 0) / 100,
+    costPerHire: Math.max(0, pick("costPerHire", 0)),
+    slip: Math.max(0, Math.min(24, pick("hiringSlipMonths", 0))),
+  };
+}
+
 export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, start, months, scenarioHires = [], now = new Date(), assumptions = {} } = {}) {
-  const slip = Math.max(0, Math.min(24, Number(assumptions.hiringSlipMonths) || 0));
-  const scen = scenarioEmployees(scenarioHires).map((e) => (slip && e.start_date ? { ...e, start_date: shiftMonthStr(e.start_date, slip) } : e));
+  const globalMult = Number(assumptions.loadedMultiplier) > 0 ? Number(assumptions.loadedMultiplier)
+    : (Number(loadedMultiplier) > 0 ? Number(loadedMultiplier) : 1);
+  const eff = (dept) => resolveAssumptions(assumptions, dept, globalMult);
+  const scen = scenarioEmployees(scenarioHires).map((e) => {
+    const s = eff(e.department_name).slip;
+    return s && e.start_date ? { ...e, start_date: shiftMonthStr(e.start_date, s) } : e;
+  });
   const all = employees.concat(scen);
   if (!start || !months) { const w = deriveWindow(all, now); start = start || w.start; months = months || w.months; }
   const cols = monthColumns(start, months);
   const startAbs = absOf(start.year, start.month0);
-  const mult = Number(assumptions.loadedMultiplier) > 0 ? Number(assumptions.loadedMultiplier)
-    : (Number(loadedMultiplier) > 0 ? Number(loadedMultiplier) : 1);
-  const benefitsPct = Math.round((mult - 1) * 1000) / 10;
-  const growth = Number(assumptions.salaryGrowthPct) || 0; // YoY %, compounds from now forward
+  const benefitsPct = Math.round((globalMult - 1) * 1000) / 10;
   const growthBaseYear = now.getFullYear();
-  const bonus = 1 + (Number(assumptions.bonusPct) || 0) / 100;   // target bonus / variable comp
-  const costPerHire = Math.max(0, Number(assumptions.costPerHire) || 0); // one-time, in the hire's start month
 
   const roster = all.map((e) => {
+    const ea = eff(e.department_name || "(none)");
     const annual = Number(e.annual_salary) || 0;
     const monthlyBase = annual / 12;
-    const loadedMonthly = monthlyBase * mult;
+    const loadedMonthly = monthlyBase * ea.mult;
     const monthlyBenefits = loadedMonthly - monthlyBase;
     const inactive = String(e.employment_status || "").toLowerCase() === "inactive";
     const p = parseMonth(e.start_date);
     const hireIdx = p ? absOf(p.year, p.month0) - startAbs : 0;
     const active = cols.map((c) => (!inactive && c.index >= hireIdx ? 1 : 0));
-    const monthlyCost = active.map((a, i) => a * loadedMonthly * bonus * (growth ? Math.pow(1 + growth / 100, Math.max(0, cols[i].year - growthBaseYear)) : 1));
-    if (costPerHire && p && hireIdx >= 0 && hireIdx < months) monthlyCost[hireIdx] += costPerHire;
+    const monthlyCost = active.map((a, i) => a * loadedMonthly * ea.bonus * (ea.growth ? Math.pow(1 + ea.growth / 100, Math.max(0, cols[i].year - growthBaseYear)) : 1));
+    if (ea.costPerHire && p && hireIdx >= 0 && hireIdx < months) monthlyCost[hireIdx] += ea.costPerHire;
     return {
       name: e.name || "", role: e.job_title || "", department: e.department_name || "(none)",
       status: inactive ? "Inactive" : "Active",
@@ -129,7 +147,7 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
     return { year: yr, totalCost, avgHc, yearEndHc, avgCostPerHead, months: idxs.length };
   });
 
-  return { cols, roster, departments, deptMonthlyCost, totalMonthlyCost, monthlyHeadcount, benefitsPct, mult, years, months, start };
+  return { cols, roster, departments, deptMonthlyCost, totalMonthlyCost, monthlyHeadcount, benefitsPct, mult: globalMult, years, months, start };
 }
 
 /** Group month columns into display periods (item 9): month | quarter | year. */

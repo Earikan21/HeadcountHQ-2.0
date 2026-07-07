@@ -355,3 +355,13 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .asm-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .asm{display:flex;flex-direction:column;font-size:12px;gap:2px}
 .asm input{border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;width:120px}
+
+/* Directive 4.0 — collapsible plan sections + relocated search */
+.plan-sect{border-top:1px solid var(--line-2)}
+.plan-sect>summary{cursor:pointer;font-weight:700;font-size:13px;padding:9px 0;list-style:none;color:var(--ink)}
+.plan-sect>summary::-webkit-details-marker{display:none}
+.plan-sect>summary::before{content:"▸";color:var(--muted);margin-right:6px;display:inline-block}
+.plan-sect[open]>summary::before{content:"▾"}
+.plan-sect-body{padding:0 0 12px}
+.model-search{margin:2px 0 8px}
+.model-search input{width:100%;max-width:380px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px}

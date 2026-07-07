@@ -102,14 +102,20 @@ export function registerBudgetRoutes(router) {
     if (!requirePermission(ctx, canSetBudgets)) return;
     const plan = getPlan(ctx.db, Number(ctx.params.id));
     if (!plan) return ctx.redirect("/model");
-    setPlanAssumptions(ctx.db, plan.id, {
+    const a = planAssumptions(plan);
+    const dept = String(ctx.body.dept || "").trim();
+    const fields = {
       salaryGrowthPct: Math.max(0, Math.min(100, Number(ctx.body.salary_growth) || 0)),
       loadedMultiplier: Number(ctx.body.loaded_mult) > 0 ? Number(ctx.body.loaded_mult) : null,
       bonusPct: Math.max(0, Math.min(100, Number(ctx.body.bonus_pct) || 0)),
       hiringSlipMonths: Math.max(0, Math.min(24, Number(ctx.body.hiring_slip) || 0)),
       costPerHire: Math.max(0, Number(ctx.body.cost_per_hire) || 0),
-    });
-    ctx.redirect(`/model?version=${plan.id}`);
+    };
+    const isDefault = fields.salaryGrowthPct === 0 && fields.loadedMultiplier == null && fields.bonusPct === 0 && fields.hiringSlipMonths === 0 && fields.costPerHire === 0;
+    if (dept) { a.byDept = a.byDept || {}; if (isDefault) delete a.byDept[dept]; else a.byDept[dept] = fields; }
+    else { Object.assign(a, fields); }
+    setPlanAssumptions(ctx.db, plan.id, a);
+    ctx.redirect(`/model?version=${plan.id}${dept ? "&dept=" + encodeURIComponent(dept) : ""}`);
   });
 
   // Add planned hires to a version from a plain-English description (AI).
