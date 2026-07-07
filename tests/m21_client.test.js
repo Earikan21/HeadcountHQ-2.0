@@ -48,10 +48,10 @@ test("clients are view-only + get the assistant (authz)", () => {
   assert.equal(canUseAssistant(clientUser), true, "clients get ask-your-data");
 });
 
-test("client nav: People + Budgets + Assistant, labeled Client, no backend chrome", async () => {
+test("client nav: People + Financial model + Assistant, labeled Client, no backend chrome", async () => {
   const home = await (await full.get("/")).text();
   assert.match(home, /href="\/roster"/);
-  assert.match(home, /href="\/budgets"/);
+  assert.match(home, /href="\/model"/);
   assert.match(home, /id="ai-fab"/);   // floating ask-your-data widget
   assert.match(home, />Client</);
   for (const re of [/href="\/philosophy"/, /href="\/accounts"/, /href="\/audit"/]) {

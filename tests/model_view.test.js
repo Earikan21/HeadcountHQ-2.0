@@ -28,9 +28,10 @@ after(async () => { await srv.close(); });
 
 test("assistant context exposes per-department average pay (aggregate)", () => {
   const c = buildAssistantContext(srv.db);
-  assert.match(c, /Engineering:.*avg base/);
-  assert.match(c, /Base salary distribution/);
-  assert.match(c, /fully-loaded cost by year/);
+  assert.match(c, /Engineering:.*avg \$/);
+  assert.match(c, /Base salary avg/);
+  assert.match(c, /Fully-loaded cost by year/);
+  assert.match(c, /Ratios & multiples/);
 });
 
 test("model shows names, a mini dashboard, and cost cells", async () => {

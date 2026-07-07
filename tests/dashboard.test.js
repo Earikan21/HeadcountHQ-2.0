@@ -21,28 +21,23 @@ async function setup() {
   return { srv, c };
 }
 
-test("admin dashboard shows balance-vs-target, budget, and growth", async () => {
+test("admin overview shows KPI strip, cost-by-department, and insights", async () => {
   const { srv, c } = await setup();
-  await c.post("/philosophy/targets/suggest", {}); // seed targets so variance shows
   const page = await (await c.get("/")).text();
-  assert.match(page, /Active headcount/);
-  assert.match(page, /Department balance vs\. target/);
+  assert.match(page, /Headcount now/);
+  assert.match(page, /Annual run-rate/);
+  assert.match(page, /Fully-loaded cost by department/);
   assert.match(page, /Engineering/);
-  assert.match(page, /Budget/);
-  assert.match(page, /Growth/);
-  assert.match(page, /position.*added/i);
+  assert.match(page, /Auto insights/);
+  assert.ok(!/Department balance vs\. target/.test(page), "old target-balance card is gone");
   await srv.close();
 });
 
-test("variance flags over/under-staffed vs target", async () => {
+test("overview renders the trend and plan comparison", async () => {
   const { srv, c } = await setup();
-  // set Engineering target very low so it reads as over-staffed
-  await c.post("/philosophy/targets", {
-    [`target_${encodeURIComponent("Engineering")}`]: "10",
-    [`target_${encodeURIComponent("Sales")}`]: "90",
-  });
   const page = await (await c.get("/")).text();
-  assert.match(page, /over|under/i);
+  assert.match(page, /Headcount &amp; fully-loaded cost/);
+  assert.match(page, /Actual path/);
   await srv.close();
 });
 

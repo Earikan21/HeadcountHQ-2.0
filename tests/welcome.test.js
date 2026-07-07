@@ -34,5 +34,5 @@ test("after a roster import the dashboard replaces the welcome screen", async ()
   await c.post(`/roster/import/${id}/commit`, {});
   const home = await (await c.get("/")).text();
   assert.ok(!/Import your roster/.test(home), "welcome should be gone once a roster exists");
-  assert.match(home, /Active headcount|Budget/);
+  assert.match(home, /Headcount now|Annual run-rate/);
 });
