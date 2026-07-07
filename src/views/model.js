@@ -29,6 +29,7 @@ function yearGroupsOf(cols, buckets) {
 function yearCells(perBucket, groups) {
   return groups.map((g) => {
     const cells = g.pos.map((i) => raw(`<td class="mc" data-yb="${g.year}" data-v="${Math.round(perBucket[i])}">${perBucket[i] ? moneyShort(perBucket[i]) : ""}</td>`));
+    if (g.pos.length <= 1) return html`${cells}`; // single bucket (e.g. yearly view): nothing to collapse
     const tot = g.pos.reduce((a, i) => a + perBucket[i], 0);
     return html`${cells}${raw(`<td class="mc ytot" data-year="${g.year}" data-v="${Math.round(tot)}" hidden>${tot ? moneyShort(tot) : ""}</td>`)}`;
   });
@@ -115,8 +116,8 @@ export function financialModelPage(ctx, model, extra = {}) {
   </div>`;
 
   const sortableHead = (key, label, type, cls = "") => raw(`<th class="sortable ${cls}" rowspan="2" data-sort="${key}" data-type="${type}">${label}</th>`);
-  const yearGroupHead = groups.map((g) => raw(`<th class="ygrp" data-year="${g.year}" data-span="${g.pos.length + 1}" colspan="${g.pos.length + 1}"><button type="button" class="ytoggle" data-year="${g.year}" aria-label="Collapse ${g.year}">–</button> ${g.year}</th>`));
-  const bucketHead = groups.map((g) => html`${g.pos.map((i) => raw(`<th class="mc" data-yb="${g.year}">${buckets[i].label}</th>`))}${raw(`<th class="mc ytot" data-year="${g.year}" hidden>${g.year} total</th>`)}`);
+  const yearGroupHead = groups.map((g) => { const multi = g.pos.length > 1; const toggle = multi ? `<button type="button" class="ytoggle" data-year="${g.year}" aria-label="Collapse ${g.year}">–</button> ` : ""; return raw(`<th class="ygrp" data-year="${g.year}" data-span="${g.pos.length}" colspan="${g.pos.length}">${toggle}${g.year}</th>`); });
+  const bucketHead = groups.map((g) => html`${g.pos.map((i) => raw(`<th class="mc" data-yb="${g.year}">${buckets[i].label}</th>`))}${g.pos.length > 1 ? raw(`<th class="mc ytot" data-year="${g.year}" hidden>${g.year} total</th>`) : ""}`);
 
   const prowFor = (r) => {
     const per = periodize(r.monthlyCost, buckets, "sum");

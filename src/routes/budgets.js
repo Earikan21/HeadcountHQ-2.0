@@ -108,8 +108,9 @@ export function registerBudgetRoutes(router) {
       setPlanHires(ctx.db, plan.id, planHires(plan).concat(parsed));
       ctx.redirect(`/model?version=${plan.id}`);
     } catch (e) {
-      console.error(`[model] ai plan failed: ${e && e.message ? e.message : e}`);
-      renderModel(ctx, plan.id, { aiError: "The assistant couldn't model that just now — try again." });
+      const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
+      console.error(`[model] ai plan failed: ${reason}`);
+      renderModel(ctx, plan.id, { aiError: "The AI couldn't model that — " + reason + " (check the provider key/model on the server)." });
     }
   });
 

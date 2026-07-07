@@ -328,3 +328,10 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .ytoggle{color:#fff}
 .sheet.outline thead th.ygrp{text-align:center;background:#1e2a4a;color:#fff;border-left:2px solid #33406a;font-size:11px}
 .sheet.outline .prow td.rowhead{padding-left:20px}
+
+/* Directive 4.0 — reimagined overview dashboard */
+.ov-bars{display:flex;flex-direction:column;gap:9px}
+.ov-bar-top{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px}
+.ov-bar-track{height:8px;background:var(--line-2);border-radius:5px;overflow:hidden}
+.ov-bar-track i{display:block;height:8px;background:var(--brand);border-radius:5px}
+.ov-insights .plainlist li{margin:5px 0;font-size:13px}

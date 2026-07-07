@@ -32,7 +32,13 @@ export function monthColumns(start, months) {
  *  a year past the latest hire, so past and future are both visible. */
 export function deriveWindow(employees, now = new Date()) {
   const starts = [];
-  for (const e of employees) { const p = parseMonth(e.start_date); if (p) starts.push(absOf(p.year, p.month0)); }
+  for (const e of employees) {
+    // Don't stretch the window back for departed staff — with no end date they add
+    // $0 and would otherwise create years of empty leading columns.
+    if (String(e.employment_status || "").toLowerCase() === "inactive") continue;
+    const p = parseMonth(e.start_date);
+    if (p) starts.push(absOf(p.year, p.month0));
+  }
   const nowAbs = absOf(now.getFullYear(), now.getMonth());
   const startAbs = starts.length ? Math.min(...starts, nowAbs) : absOf(now.getFullYear(), 0);
   // Look back to the earliest start, and forward FIVE years (60 months) from now.

@@ -116,16 +116,19 @@ export function registerRosterRoutes(router) {
     ).get(Number(ctx.params.id));
     if (!src) return ctx.redirect("/model");
     const extId = nextEmployeeId(ctx.db);
+    const today = new Date().toISOString().slice(0, 10);
+    const roleName = src.job_title || "position";
     const row = {
-      employee_id: extId, name: (src.name || "Role") + " (copy)", job_title: src.job_title || "",
+      employee_id: extId, name: "New " + roleName, job_title: src.job_title || "",
       manager: src.manager || "", employee_type: src.employee_type || "",
       employment_status: "active", compensation_amount: src.annual_salary, compensation_unit: "annual", annual_salary: src.annual_salary,
+      start_date: today,
     };
     const empId = upsertEmployee(ctx.db, row, src.department_id);
     const mult = getSettings(ctx.db).loaded_cost_multiplier;
     ensureSeatForEmployee(ctx.db, { employeeId: empId, departmentId: src.department_id, title: src.job_title || "", loadedCost: loadedCostFn(src.annual_salary, mult) });
-    logAudit(ctx.db, { userId: ctx.user.id, action: "person.duplicated", entity: "employee", entityId: empId, detail: { from: src.id } });
-    ctx.redirect("/model?msg=Role+duplicated");
+    logAudit(ctx.db, { userId: ctx.user.id, action: "position.duplicated", entity: "employee", entityId: empId, detail: { from: src.id } });
+    ctx.redirect("/model?msg=Position+duplicated");
   });
 
   // ---- Step 1: upload ----

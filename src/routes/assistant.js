@@ -12,6 +12,7 @@ import { mixVsTarget } from "../domain/philosophy.js";
 import { clientFromConfig, answerQuestion } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
 import { buildHeadcountModel } from "../domain/model.js";
+import { computeMetrics, metricsText } from "../domain/metrics.js";
 import { listPlans } from "../repos/plans.js";
 
 const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured);
@@ -41,8 +42,9 @@ export function registerAssistantRoutes(router) {
       logAudit(ctx.db, { userId: ctx.user.id, action: "assistant.asked", entity: "assistant", detail: { chars: q.length } });
       return ctx.json(200, { answer });
     } catch (e) {
-      console.error(`[assistant] ask failed: ${e && e.message ? e.message : e}`);
-      return ctx.json(200, { error: "The assistant couldn't answer just now — please try again." });
+      const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
+      console.error(`[assistant] ask failed: ${reason}`);
+      return ctx.json(200, { error: "The assistant hit an error — " + reason });
     }
   });
 
@@ -58,8 +60,9 @@ export function registerAssistantRoutes(router) {
       logAudit(ctx.db, { userId: ctx.user.id, action: "assistant.asked", entity: "assistant", detail: { chars: question.length } });
       ctx.html(200, page(ctx, { question, answer }));
     } catch (e) {
-      console.error(`[assistant] answer failed: ${e && e.message ? e.message : e}`);
-      ctx.html(200, page(ctx, { question, error: "The assistant couldn't answer just now — please try again." }));
+      const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
+      console.error(`[assistant] answer failed: ${reason}`);
+      ctx.html(200, page(ctx, { question, error: "The assistant hit an error — " + reason }));
     }
   });
 }
@@ -74,79 +77,33 @@ export function buildAssistantContext(db) {
   const roll = headcountRollup(db);
   const targets = getDepartmentTargets(db);
   const emps = listEmployees(db, {});
-  const totalBase = emps.reduce((a, e) => a + (e.annual_salary || 0), 0);
-  const mult = Number(s.loaded_cost_multiplier) || 1.3;
-  const loaded = Math.round(totalBase * mult);
   const rec = allReconciliation(db);
   const fin = getFinancials(db);
-  const runway = Number(fin.monthly_burn) > 0 ? Math.floor(Number(fin.cash_balance) / Number(fin.monthly_burn)) : null;
 
-  const actualByDept = {};
-  for (const d of roll.departments) actualByDept[d.department] = d.active;
-  const targetByDept = {};
-  for (const [k, v] of Object.entries(targets)) targetByDept[k] = v.target_pct;
-  const mix = mixVsTarget(actualByDept, targetByDept);
+  // Pre-computed background analytics (per-department averages, ranges, ratios,
+  // multiples, tenure, multi-year model) — the single source the assistant reads.
+  const metrics = computeMetrics({ employees: emps, settings: s, rollup: roll, reconciliation: rec, financials: fin, now: new Date() });
 
-  // per-department compensation (aggregate — averages, totals, and ranges; never individuals)
-  const compByDept = {};
-  for (const e of emps) {
-    const d = e.department_name || "(none)";
-    const sal = e.annual_salary || 0;
-    if (!compByDept[d]) compByDept[d] = { sum: 0, n: 0, min: Infinity, max: 0 };
-    const cd = compByDept[d];
-    cd.sum += sal; cd.n += 1;
-    if (sal > 0) { cd.min = Math.min(cd.min, sal); cd.max = Math.max(cd.max, sal); }
-  }
-  const deptLines = roll.departments.map((d) => {
-    const m = mix.find((x) => x.name === d.department) || {};
-    const t = m.targetPct != null ? `, ${m.actualPct}% of headcount vs ${m.targetPct}% target (${m.variance > 0 ? "+" : ""}${m.variance})` : "";
-    const c = compByDept[d.department];
-    const comp = c && c.n ? `, avg base ${money(Math.round(c.sum / c.n))}, range ${money(c.min === Infinity ? 0 : c.min)}\u2013${money(c.max)}, dept base total ${money(Math.round(c.sum))}, loaded ${money(Math.round(c.sum * mult))}` : "";
-    return `- ${d.department}: ${d.active} filled, ${d.approved} approved${t}${comp}`;
-  }).join("\n");
-
-  // company-wide salary distribution (aggregate)
-  const sals = emps.map((e) => e.annual_salary || 0).filter((x) => x > 0).sort((a, b) => a - b);
-  const avgSal = sals.length ? Math.round(sals.reduce((a, b) => a + b, 0) / sals.length) : 0;
-  const median = sals.length ? sals[Math.floor(sals.length / 2)] : 0;
-
-  // employment type / status breakdown
-  const byType = {}, byStatus = {};
-  for (const e of emps) {
-    const ty = e.employee_type || "unspecified"; byType[ty] = (byType[ty] || 0) + 1;
-    const st = e.employment_status || "unspecified"; byStatus[st] = (byStatus[st] || 0) + 1;
-  }
-  const typeLine = Object.entries(byType).map(([k, v]) => `${v} ${k}`).join(", ") || "n/a";
-  const statusLine = Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(", ") || "n/a";
-
-  // forward financial model — fully-loaded cost by year (built from start dates, 5-year horizon)
-  let modelLines = "  (no roster yet)";
-  try {
-    const model = buildHeadcountModel({ employees: emps, loadedMultiplier: mult });
-    if (model.years.length) modelLines = model.years.map((y) => `  - ${y.year}: end headcount ${y.yearEndHc}, fully-loaded ${money(y.totalCost)}, avg loaded/head ${money(y.avgCostPerHead)}`).join("\n");
-  } catch { /* ignore */ }
+  // department mix vs the target balance (philosophy)
+  const actualByDept = {}; for (const d of roll.departments) actualByDept[d.department] = d.active;
+  const targetByDept = {}; for (const [k, v] of Object.entries(targets)) targetByDept[k] = v.target_pct;
+  const mixLines = mixVsTarget(actualByDept, targetByDept)
+    .filter((m) => m.targetPct != null)
+    .map((m) => `  - ${m.name}: ${m.actualPct}% vs ${m.targetPct}% target (${m.variance > 0 ? "+" : ""}${m.variance})`)
+    .join("\n");
 
   let planNames = [];
   try { planNames = listPlans(db).map((p) => p.name); } catch { /* ignore */ }
 
   return [
-    `Company stage: ${s.company_phase}; industry: ${s.industry || "general"}. Fully-loaded multiplier: ${mult}x (base + benefits/taxes).`,
-    `Headcount: ${roll.totals.active} filled, ${roll.totals.approved} approved, ${roll.totals.open} open. Types: ${typeLine}. Status: ${statusLine}.`,
-    `Company base comp ${money(totalBase)}; fully-loaded ${money(loaded)}. Base salary distribution: min ${money(sals[0] || 0)}, avg ${money(avgSal)}, median ${money(median)}, max ${money(sals[sals.length - 1] || 0)}.`,
-    `Headcount budget: ${rec.allocation.headcount.cap || "not set"} (allocated ${rec.allocation.headcount.allocated}). Money budget: ${rec.allocation.money.cap ? money(rec.allocation.money.cap) : "not set"}; committed ${money(rec.company.money.committed)}.`,
-    fin.cash_balance ? `Cash ${money(fin.cash_balance)}; monthly burn ${money(fin.monthly_burn)}; runway ${runway != null ? runway + " months" : "n/a"}.` : `Financials (cash/burn) not entered yet.`,
+    `Company stage: ${s.company_phase}; industry: ${s.industry || "general"}.`,
+    metricsText(metrics),
+    mixLines ? `Department headcount mix vs target:\n${mixLines}` : ``,
     planNames.length ? `Saved plan versions: ${planNames.join(", ")}.` : ``,
     ``,
-    `Departments (filled / approved / target mix / compensation):`,
-    deptLines || "(no departments yet)",
-    ``,
-    `Financial model — fully-loaded cost by year:`,
-    modelLines,
-    ``,
-    `You have ALL aggregate figures above, including per-department average and range of pay, salary distribution, budgets, runway, and the year-by-year model. You do NOT have individual salaries tied to a specific person's name — decline only that.`,
+    `Everything above is pre-computed aggregate analytics (averages, medians, ranges, ratios, multiples, per-department breakdowns, budgets, runway, and the multi-year model). Answer directly from it. You do NOT have individual salaries tied to a specific person's name — decline only that.`,
   ].join("\n");
 }
-
 function page(ctx, { question, answer, error }) {
   const ready = assistReady(ctx);
   const quickForms = QUICK.map(([q, label]) => html`<form method="post" action="/assistant" class="inline">

@@ -4,12 +4,17 @@ import { canViewCompTotals, departmentScope, canSeeAllDepartments, canManageSett
 import { countUsers } from "../repos/users.js";
 import { listDepartments } from "../repos/departments.js";
 import { headcountRollup, recentSeatAdds } from "../repos/seats.js";
-import { allReconciliation, getCompanyBudget } from "../repos/budgets.js";
-import { getDepartmentTargets } from "../repos/targets.js";
-import { mixVsTarget } from "../domain/philosophy.js";
+import { getCompanyBudget } from "../repos/budgets.js";
 import { welcomePage } from "../views/welcome.js";
 import { listRequests } from "../repos/requests.js";
 import { OPEN_STATUSES } from "../domain/requests.js";
+import { listEmployees } from "../repos/roster.js";
+import { getSettings } from "../repos/settings.js";
+import { getFinancials } from "../repos/planning.js";
+import { computeMetrics } from "../domain/metrics.js";
+import { buildHeadcountModel } from "../domain/model.js";
+import { listPlans, planHires } from "../repos/plans.js";
+import { overviewDashboard } from "../views/overview.js";
 
 export function registerHomeRoutes(router) {
   router.get("/", (ctx) => {
@@ -23,6 +28,10 @@ export function registerHomeRoutes(router) {
         const budgetDone = (cap.headcount || 0) > 0 || (cap.money || 0) > 0;
         return ctx.html(200, welcomePage(ctx, { rosterDone, budgetDone }));
       }
+    }
+    // Company-wide viewers (AZ Finance + clients) get the reimagined overview.
+    if (canSeeAllDepartments(ctx.user)) {
+      return ctx.html(200, renderPage(ctx, { title: "Overview", body: buildOverview(ctx), active: "dashboard" }));
     }
     const scope = departmentScope(ctx.user);
     const roll = headcountRollup(ctx.db, { departmentId: scope });
@@ -47,59 +56,64 @@ export function registerHomeRoutes(router) {
         <p class="muted">${displayRole(ctx.user)} · ${roleNote(ctx.user.role)}</p>
       </div>
       <div class="kpis">${kpis}</div>
-      ${canSeeAllDepartments(ctx.user) ? adminPanels(ctx) : managerPanels(ctx, scope, roll, openReq)}
+      ${managerPanels(ctx, scope, roll, openReq)}
     `;
     return ctx.html(200, renderPage(ctx, { title: "Dashboard", body, active: "dashboard" }));
   });
 }
 
-function adminPanels(ctx) {
-  // ---- department balance vs target ----
-  const roll = headcountRollup(ctx.db);
-  const actualByDept = {};
-  for (const d of roll.departments) actualByDept[d.department] = d.active;
-  const targets = getDepartmentTargets(ctx.db);
-  const targetByDept = {};
-  for (const [k, v] of Object.entries(targets)) targetByDept[k] = v.target_pct;
-  const mix = mixVsTarget(actualByDept, targetByDept).filter((m) => m.count > 0 || m.targetPct != null);
+function buildOverview(ctx) {
+  const employees = listEmployees(ctx.db, {});
+  const settings = getSettings(ctx.db);
+  const mult = Number(settings.loaded_cost_multiplier) || 1.2;
+  const rollup = headcountRollup(ctx.db);
+  const fin = getFinancials(ctx.db);
+  const now = new Date();
+  const metrics = computeMetrics({ employees, settings, rollup, financials: fin, now });
+  const model = buildHeadcountModel({ employees, loadedMultiplier: mult, now });
+  const nowYear = now.getFullYear();
+  const mm = metrics.model || {};
 
-  const mixRows = mix.length ? mix.map((m) => html`<tr>
-      <td><b>${m.name}</b></td>
-      <td class="right">${m.count}</td>
-      <td class="right">${m.actualPct}%</td>
-      <td class="right">${m.targetPct == null ? "—" : m.targetPct + "%"}</td>
-      <td>${varianceBadge(m.variance)}</td>
-    </tr>`) : raw('<tr><td colspan="5" class="muted">Import a roster and set a target balance to see this.</td></tr>');
+  const trendYears = model.years.map((y) => ({ year: y.year, headcount: y.yearEndHc, cost: y.totalCost }));
+  const growth90 = recentSeatAdds(ctx.db, 90).total;
+  const thisYear = (mm.costByYear || []).find((y) => y.year === nowYear);
+  const avgLoadedMo = metrics.company.avgBase ? Math.round((metrics.company.avgBase * mult) / 12) : 0;
+  const runway = metrics.financials ? metrics.financials.runwayMonths : null;
 
-  // ---- budget summary ----
-  const { allocation, company } = allReconciliation(ctx.db);
-  // ---- growth ----
-  const growth = recentSeatAdds(ctx.db, 90);
+  const kpis = [
+    { label: "Headcount now", value: String(mm.headcountNow != null ? mm.headcountNow : metrics.company.headcount), sub: growth90 ? `+${growth90} last 90 days` : "" },
+    { label: "Annual run-rate", value: money(mm.annualRunRate || 0), sub: "fully loaded" },
+    { label: `${nowYear} spend`, value: money(thisYear ? thisYear.totalLoaded : 0), sub: mm.yoyCostGrowthPct != null ? `${mm.yoyCostGrowthPct >= 0 ? "+" : ""}${mm.yoyCostGrowthPct}% YoY` : "" },
+    { label: "Avg loaded / head", value: money(avgLoadedMo), sub: "per month" },
+  ];
+  if (runway != null) kpis.push({ label: "Cash runway", value: runway + " mo", sub: "at current burn" });
+  kpis.push({ label: "Net new (12 mo)", value: `${(mm.netNew12mo || 0) >= 0 ? "+" : ""}${mm.netNew12mo || 0}`, sub: "planned" });
 
-  return html`
-    <div class="grid2">
-      <section class="card">
-        <h2>Department balance vs. target</h2>
-        <table class="table">
-          <thead><tr><th>Department</th><th class="right">HC</th><th class="right">Actual</th><th class="right">Target</th><th>Status</th></tr></thead>
-          <tbody>${mixRows}</tbody>
-        </table>
-        ${canManageSettings(ctx.user) ? raw('<p class="muted small"><a href="/philosophy">Edit the target balance →</a></p>') : ""}
-      </section>
-      <div>
-        <section class="card">
-          <h2>Budget</h2>
-          <p>Positions allocated <b>${allocation.headcount.allocated}</b> of <b>${allocation.headcount.cap || "—"}</b> ${allocation.headcount.over ? raw(`<span class="over-txt">(over by ${allocation.headcount.over})</span>`) : ""}</p>
-          <p>Spend committed <b>${money(company.money.committed)}</b> of <b>${company.money.budget ? money(company.money.budget) : "—"}</b></p>
-          <p class="muted small"><a href="/budgets">Manage budgets →</a></p>
-        </section>
-        <section class="card">
-          <h2>Growth · last 90 days</h2>
-          <p><b>${growth.total}</b> position${growth.total === 1 ? "" : "s"} added across the company.</p>
-          ${Object.keys(growth.byDept).length ? html`<ul class="plainlist">${Object.entries(growth.byDept).sort((a,b)=>b[1]-a[1]).map(([d, n]) => html`<li>${d}: <b>+${n}</b></li>`)}</ul>` : html`<p class="muted small">No recent additions.</p>`}
-        </section>
-      </div>
-    </div>`;
+  const deptBars = metrics.departments.slice(0, 6).map((d) => ({ name: d.department, pct: d.pctBaseCost, cost: d.totalLoaded }));
+
+  const targetYear = nowYear + 1;
+  const yearOf = (m) => m.years.find((y) => y.year === targetYear) || m.years[m.years.length - 1];
+  const ay = yearOf(model);
+  const planRows = [{ name: "Actual path", hc: ay ? ay.yearEndHc : (mm.headcountNow || 0), cost: ay ? ay.totalCost : 0 }];
+  for (const pl of listPlans(ctx.db).slice(0, 3)) {
+    const pm = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: planHires(pl), now });
+    const y = yearOf(pm);
+    planRows.push({ name: pl.name, hc: y ? y.yearEndHc : 0, cost: y ? y.totalCost : 0 });
+  }
+
+  const insights = [];
+  const topCost = metrics.departments.slice().sort((a, b) => b.pctBaseCost - a.pctBaseCost)[0];
+  if (topCost && topCost.headcount) insights.push(`${topCost.department} is ${topCost.pctBaseCost}% of loaded cost — the biggest driver.`);
+  if (mm.yoyCostGrowthPct != null) insights.push(`Fully-loaded run-rate is ${mm.yoyCostGrowthPct >= 0 ? "up" : "down"} ${Math.abs(mm.yoyCostGrowthPct)}% year over year.`);
+  if (runway != null) insights.push(`At current burn, runway is about ${runway} months.`);
+  const rich = metrics.departments.filter((d) => d.headcount > 1).sort((a, b) => b.avgVsCompanyIndex - a.avgVsCompanyIndex)[0];
+  if (rich && rich.avgVsCompanyIndex > 105) insights.push(`${rich.department} pays ${rich.avgVsCompanyIndex - 100}% above the company average salary.`);
+  if ((mm.netNew12mo || 0) > 0) insights.push(`Plans add ${mm.netNew12mo} net new hires over the next 12 months.`);
+
+  return overviewDashboard(ctx, {
+    greeting: greeting(ctx.user), roleLine: `${displayRole(ctx.user)} · company overview`,
+    kpis, trendYears, nowYear, deptBars, planRows, targetYear, insights: insights.slice(0, 4),
+  });
 }
 
 function managerPanels(ctx, scope, roll, openReq) {
