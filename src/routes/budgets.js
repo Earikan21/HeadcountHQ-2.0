@@ -15,7 +15,7 @@ import { buildHeadcountModel } from "../domain/model.js";
 import { listEmployees } from "../repos/roster.js";
 import { clientFromConfig, parseScenarioHires } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
-import { listPlans, getPlan, createPlan, planHires, setPlanHires, deletePlan } from "../repos/plans.js";
+import { listPlans, getPlan, createPlan, planHires, setPlanHires, deletePlan, planAssumptions, setPlanAssumptions } from "../repos/plans.js";
 
 /** Money a department's headcount budget implies: current cost + midpoint of the
  *  expected cost of its still-unfilled budgeted positions. Idempotent. */
@@ -32,11 +32,16 @@ export function registerBudgetRoutes(router) {
     const plans = listPlans(ctx.db);
     const current = versionId ? getPlan(ctx.db, versionId) : null;
     const hires = planHires(current);
-    const employees = listEmployees(ctx.db, {});
+    const allEmployees = listEmployees(ctx.db, {});
+    const allDepartments = [...new Set(allEmployees.map((e) => e.department_name || "(none)"))].sort();
+    const dept = ctx.query.get("dept") || null;
+    const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
+    const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
+    const assumptions = current ? planAssumptions(current) : {};
     const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
-    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: hires });
+    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions });
     ctx.html(200, financialModelPage(ctx, model, {
-      period: ctx.query.get("period"), plans, current, hires,
+      period: ctx.query.get("period"), plans, current, hires, dept, allDepartments, assumptions,
       canEdit: canSetBudgets(ctx.user), aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
     }));
   };
@@ -89,6 +94,21 @@ export function registerBudgetRoutes(router) {
     const hires = planHires(plan);
     const idx = Number(ctx.params.idx);
     if (idx >= 0 && idx < hires.length) { hires.splice(idx, 1); setPlanHires(ctx.db, plan.id, hires); }
+    ctx.redirect(`/model?version=${plan.id}`);
+  });
+
+  // Save a plan's assumptions / drivers (YoY salary growth, benefits load override).
+  router.post("/model/versions/:id/assumptions", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    setPlanAssumptions(ctx.db, plan.id, {
+      salaryGrowthPct: Math.max(0, Math.min(100, Number(ctx.body.salary_growth) || 0)),
+      loadedMultiplier: Number(ctx.body.loaded_mult) > 0 ? Number(ctx.body.loaded_mult) : null,
+      bonusPct: Math.max(0, Math.min(100, Number(ctx.body.bonus_pct) || 0)),
+      hiringSlipMonths: Math.max(0, Math.min(24, Number(ctx.body.hiring_slip) || 0)),
+      costPerHire: Math.max(0, Number(ctx.body.cost_per_hire) || 0),
+    });
     ctx.redirect(`/model?version=${plan.id}`);
   });
 

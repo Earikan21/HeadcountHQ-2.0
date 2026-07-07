@@ -42,7 +42,6 @@
   var fSearch = document.getElementById("f-search"), fDept = document.getElementById("f-dept"), fMin = document.getElementById("f-min"), fMax = document.getElementById("f-max");
   function applyFilters() {
     var q = (fSearch && fSearch.value || "").trim().toLowerCase();
-    var dept = (fDept && fDept.value) || "";
     var min = fMin && fMin.value !== "" ? Number(fMin.value) : null;
     var max = fMax && fMax.value !== "" ? Number(fMax.value) : null;
     blocks().forEach(function (b) {
@@ -52,17 +51,22 @@
         var name = tr.getAttribute("data-name") || "", role = tr.getAttribute("data-role") || "", dd = tr.getAttribute("data-dept") || "", sal = Number(tr.getAttribute("data-salary") || 0);
         var ok = true;
         if (q && name.indexOf(q) < 0 && role.indexOf(q) < 0 && dd.toLowerCase().indexOf(q) < 0) ok = false;
-        if (dept && dd !== dept) ok = false;
         if (min != null && sal < min) ok = false;
         if (max != null && sal > max) ok = false;
-        if (ok && deptCollapsed[d]) { tr.style.display = "none"; } // collapsed: match but hidden
+        if (ok && deptCollapsed[d]) { tr.style.display = "none"; }
         else { tr.style.display = ok ? "" : "none"; }
         if (ok) anyVisible = true;
       });
       b.grp.style.display = anyVisible ? "" : "none";
     });
   }
-  [fSearch, fDept, fMin, fMax].forEach(function (el) { if (el) { el.addEventListener("input", applyFilters); el.addEventListener("change", applyFilters); } });
+  [fSearch, fMin, fMax].forEach(function (el) { if (el) { el.addEventListener("input", applyFilters); el.addEventListener("change", applyFilters); } });
+  // Department is a server-side scope (so the annual summary + subtotals recompute).
+  if (fDept) fDept.addEventListener("change", function () {
+    var u = new URL(window.location.href);
+    if (fDept.value) u.searchParams.set("dept", fDept.value); else u.searchParams.delete("dept");
+    window.location.href = u.toString();
+  });
 
   // ---- column (year) collapse ----
   Array.prototype.forEach.call(document.querySelectorAll(".ytoggle"), function (btn) {

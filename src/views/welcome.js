@@ -22,10 +22,9 @@ export function welcomePage(ctx, { rosterDone = false, budgetDone = false } = {}
   const body = html`
     <div class="pagehead">
       <h1>Welcome${name ? ", " + name : ""}</h1>
-      <p class="muted">Let's set up this workspace. Two quick steps and your budget dashboard comes to life.</p>
+      <p class="muted">Let's set up this workspace. Import your roster and your model comes to life.</p>
     </div>
-    ${stepCard(1, "Import your roster", "Upload a CSV (Excel: File → Save As → CSV first) of your people. We turn it into departments, seats, and cost — your single source of truth. Everything is processed on your own server.", rosterDone, "/roster/import", "Import roster")}
-    ${stepCard(2, "Set your budget", "Set one company-wide headcount and money budget, then allocate it across departments.", budgetDone, "/budgets", "Set budget")}
+    ${stepCard(1, "Import your roster", "Upload a CSV (Excel: File → Save As → CSV first) of your people — include a start-date column. We turn it into departments, seats, and a fully-loaded cost model — your single source of truth. Everything is processed on your own server.", rosterDone, "/roster/import", "Import roster")}
     <section class="card">
       <h2>Then what?</h2>
       <p class="muted small">Your <b>People</b> view and <b>Budget dashboard</b> update automatically as data comes in. Fine-tune the rules any time under <a href="/philosophy">Philosophy</a>.</p>

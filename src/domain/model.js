@@ -17,6 +17,14 @@ export function parseMonth(dateStr) {
   return isNaN(d.getTime()) ? null : { year: d.getFullYear(), month0: d.getMonth() };
 }
 
+/** Shift a "YYYY-MM-DD" date by n months (for hiring slippage). Null stays null. */
+function shiftMonthStr(dateStr, n) {
+  const p = parseMonth(dateStr);
+  if (!p) return dateStr;
+  const abs = absOf(p.year, p.month0) + n;
+  return `${Math.floor(abs / 12)}-${String((abs % 12) + 1).padStart(2, "0")}-01`;
+}
+
 /** Month columns for a window starting at {year, month0} spanning `months`. */
 export function monthColumns(start, months) {
   const base = absOf(start.year, start.month0);
@@ -61,13 +69,20 @@ export function scenarioEmployees(scenarioHires = []) {
   return out;
 }
 
-export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, start, months, scenarioHires = [], now = new Date() } = {}) {
-  const all = employees.concat(scenarioEmployees(scenarioHires));
+export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, start, months, scenarioHires = [], now = new Date(), assumptions = {} } = {}) {
+  const slip = Math.max(0, Math.min(24, Number(assumptions.hiringSlipMonths) || 0));
+  const scen = scenarioEmployees(scenarioHires).map((e) => (slip && e.start_date ? { ...e, start_date: shiftMonthStr(e.start_date, slip) } : e));
+  const all = employees.concat(scen);
   if (!start || !months) { const w = deriveWindow(all, now); start = start || w.start; months = months || w.months; }
   const cols = monthColumns(start, months);
   const startAbs = absOf(start.year, start.month0);
-  const mult = Number(loadedMultiplier) > 0 ? Number(loadedMultiplier) : 1;
+  const mult = Number(assumptions.loadedMultiplier) > 0 ? Number(assumptions.loadedMultiplier)
+    : (Number(loadedMultiplier) > 0 ? Number(loadedMultiplier) : 1);
   const benefitsPct = Math.round((mult - 1) * 1000) / 10;
+  const growth = Number(assumptions.salaryGrowthPct) || 0; // YoY %, compounds from now forward
+  const growthBaseYear = now.getFullYear();
+  const bonus = 1 + (Number(assumptions.bonusPct) || 0) / 100;   // target bonus / variable comp
+  const costPerHire = Math.max(0, Number(assumptions.costPerHire) || 0); // one-time, in the hire's start month
 
   const roster = all.map((e) => {
     const annual = Number(e.annual_salary) || 0;
@@ -78,7 +93,8 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
     const p = parseMonth(e.start_date);
     const hireIdx = p ? absOf(p.year, p.month0) - startAbs : 0;
     const active = cols.map((c) => (!inactive && c.index >= hireIdx ? 1 : 0));
-    const monthlyCost = active.map((a) => a * loadedMonthly);
+    const monthlyCost = active.map((a, i) => a * loadedMonthly * bonus * (growth ? Math.pow(1 + growth / 100, Math.max(0, cols[i].year - growthBaseYear)) : 1));
+    if (costPerHire && p && hireIdx >= 0 && hireIdx < months) monthlyCost[hireIdx] += costPerHire;
     return {
       name: e.name || "", role: e.job_title || "", department: e.department_name || "(none)",
       status: inactive ? "Inactive" : "Active",

@@ -51,25 +51,43 @@ function planEditor(ctx, extra) {
   const cur = extra.current;
   if (!cur || !extra.canEdit) return "";
   const hires = extra.hires || [];
-  const rows = hires.length ? hires.map((h, i) => html`<tr>
-      <td><b>${h.count}× ${h.role}</b></td><td>${h.department}</td><td>${h.start_month || "from start"}</td><td class="right">${money(h.annual_salary)}</td>
-      <td><form method="post" action="/model/versions/${cur.id}/hire/${i}/delete" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">remove</button></form></td>
-    </tr>`) : html`<tr><td colspan="5" class="muted">No planned hires yet — add one below.</td></tr>`;
+  const a = extra.assumptions || {};
+  const chips = hires.length
+    ? html`<div class="hire-chips">${hires.map((h, i) => html`<span class="chip">${h.count}× ${h.role} · ${h.department} · ${h.start_month || "start"} · ${money(h.annual_salary)}<form method="post" action="/model/versions/${cur.id}/hire/${i}/delete" class="inline">${csrfField(ctx)}<button class="chip-x" type="submit" aria-label="remove">×</button></form></span>`)}</div>`
+    : html`<p class="muted small">No planned hires yet.</p>`;
   return html`<section class="card plan-editor">
     <div class="row-between"><h2>Plan: ${cur.name} <span class="hint">layered on the live roster</span></h2>
       <form method="post" action="/model/versions/${cur.id}/delete" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">Delete plan</button></form></div>
     ${extra.aiError ? html`<div class="flash warn">${extra.aiError}</div>` : ""}
-    ${extra.aiReady ? html`<form method="post" action="/model/versions/${cur.id}/ai" class="scn-ai">${csrfField(ctx)}<input name="description" placeholder="e.g. hire 2 AEs in Sales starting June 2027 at $120k" aria-label="Describe hires"><button class="btn sm" type="submit">Add with AI</button></form>` : ""}
-    <form method="post" action="/model/versions/${cur.id}/hire" class="scn-manual">
-      ${csrfField(ctx)}
-      <input name="scn_department" placeholder="Department" aria-label="Department">
-      <input name="scn_role" placeholder="Role" aria-label="Role">
-      <input name="scn_start" type="month" aria-label="Start month">
-      <input name="scn_salary" type="number" min="0" step="1000" placeholder="Annual $" aria-label="Annual salary">
-      <input name="scn_count" type="number" min="1" step="1" value="1" aria-label="Count" style="width:64px">
-      <button class="btn sm ghost" type="submit">Add hire</button>
-    </form>
-    <table class="table" style="margin-top:10px"><thead><tr><th>Role</th><th>Dept</th><th>Start</th><th class="right">Salary</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="plan-grid">
+      <div>
+        <h3 class="mini">Hires</h3>
+        ${extra.aiReady ? html`<form method="post" action="/model/versions/${cur.id}/ai" class="scn-ai">${csrfField(ctx)}<input name="description" placeholder="e.g. 2 AEs in Sales, Jun 2027, $120k" aria-label="Describe hires"><button class="btn sm" type="submit">AI</button></form>` : ""}
+        <form method="post" action="/model/versions/${cur.id}/hire" class="scn-manual">
+          ${csrfField(ctx)}
+          <input name="scn_department" placeholder="Dept" aria-label="Department">
+          <input name="scn_role" placeholder="Role" aria-label="Role">
+          <input name="scn_start" type="month" aria-label="Start month">
+          <input name="scn_salary" type="number" min="0" step="1000" placeholder="Annual $" aria-label="Annual salary">
+          <input name="scn_count" type="number" min="1" step="1" value="1" aria-label="Count" style="width:56px">
+          <button class="btn sm ghost" type="submit">Add</button>
+        </form>
+        ${chips}
+      </div>
+      <div>
+        <h3 class="mini">Assumptions &amp; drivers</h3>
+        <form method="post" action="/model/versions/${cur.id}/assumptions" class="asm-form">
+          ${csrfField(ctx)}
+          <label class="asm">YoY salary growth <span class="muted">%</span><input name="salary_growth" type="number" min="0" max="100" step="0.5" value="${a.salaryGrowthPct || 0}"></label>
+          <label class="asm">Benefits / load <span class="muted">× base</span><input name="loaded_mult" type="number" min="1" max="3" step="0.01" value="${a.loadedMultiplier || ""}" placeholder="default"></label>
+          <label class="asm">Target bonus <span class="muted">% of base</span><input name="bonus_pct" type="number" min="0" max="100" step="1" value="${a.bonusPct || 0}"></label>
+          <label class="asm">Hiring slippage <span class="muted">months</span><input name="hiring_slip" type="number" min="0" max="24" step="1" value="${a.hiringSlipMonths || 0}"></label>
+          <label class="asm">Cost per hire <span class="muted">one-time $</span><input name="cost_per_hire" type="number" min="0" step="500" value="${a.costPerHire || 0}"></label>
+          <button class="btn sm ghost" type="submit">Save</button>
+        </form>
+        <p class="muted small" style="margin-top:6px">Applied to this plan only. Salary growth compounds each year from now forward.</p>
+      </div>
+    </div>
   </section>`;
 }
 
@@ -103,11 +121,13 @@ export function financialModelPage(ctx, model, extra = {}) {
     ${kpi("Departments", n0(departments.length), benefitsPct + "% benefits load")}
   </div>`;
 
-  const periodTab = (p, label) => raw(`<a class="ptab ${p === period ? "on" : ""}" href="/model?period=${p}${extra.current ? "&version=" + extra.current.id : ""}">${label}</a>`);
+  const allDepts = extra.allDepartments || departments;
+  const q = (base) => base + (extra.current ? "&version=" + extra.current.id : "") + (extra.dept ? "&dept=" + encodeURIComponent(extra.dept) : "");
+  const periodTab = (p, label) => raw(`<a class="ptab ${p === period ? "on" : ""}" href="${q("/model?period=" + p)}">${label}</a>`);
   const controls = html`<div class="model-controls">
     <div class="ptabs">${periodTab("month", "Monthly")}${periodTab("quarter", "Quarterly")}${periodTab("year", "Yearly")}</div>
     <input id="f-search" type="search" placeholder="Search name / role / dept" aria-label="Search">
-    <select id="f-dept" aria-label="Filter department"><option value="">All departments</option>${departments.map((d) => html`<option value="${d}">${d}</option>`)}</select>
+    <select id="f-dept" aria-label="Scope to department"><option value="">All departments</option>${allDepts.map((d) => html`<option value="${d}" ${extra.dept === d ? raw("selected") : ""}>${d}</option>`)}</select>
     <input id="f-min" type="number" placeholder="Min $" aria-label="Min salary" style="width:96px">
     <input id="f-max" type="number" placeholder="Max $" aria-label="Max salary" style="width:96px">
     <span class="zoomctl"><button id="zoom-out" type="button" aria-label="Zoom out">&minus;</button><span id="zoom-lvl">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button></span>
@@ -135,7 +155,8 @@ export function financialModelPage(ctx, model, extra = {}) {
   };
 
   const grandTotal = html`<tr class="grp total-grp">
-    <td class="grphead" colspan="${LABELS}"><b>Total fully-loaded cost</b></td>
+    <td class="rowhead grplabel"><b>Total fully-loaded cost</b></td>
+    <td class="grpfill" colspan="${LABELS - 1}"></td>
     ${yearCells(periodize(totalMonthlyCost, buckets, "sum"), groups)}
   </tr>`;
 
@@ -143,7 +164,8 @@ export function financialModelPage(ctx, model, extra = {}) {
     const members = roster.filter((r) => r.department === d);
     const sub = periodize(deptMonthlyCost[d], buckets, "sum");
     const head = html`<tr class="grp" data-dept="${d}">
-      <td class="grphead" colspan="${LABELS}"><button type="button" class="grptoggle" data-dept="${d}" aria-label="Collapse ${d}">▾</button> <b>${d}</b> <span class="muted">(${members.length})</span></td>
+      <td class="rowhead grplabel"><button type="button" class="grptoggle" data-dept="${d}" aria-label="Collapse ${d}">▾</button> <b>${d}</b> <span class="muted">(${members.length})</span></td>
+      <td class="grpfill" colspan="${LABELS - 1}"></td>
       ${yearCells(sub, groups)}
     </tr>`;
     return html`${head}${members.map(prowFor)}`;
@@ -187,7 +209,7 @@ export function financialModelPage(ctx, model, extra = {}) {
   const body = html`
     <div class="hm-band">
       <div class="hm-logo">HQ</div>
-      <div><div class="hm-title">HEADCOUNT MODEL</div><div class="hm-sub">${range} · fully-loaded (base + ${benefitsPct}% benefits/taxes)</div></div>
+      <div><div class="hm-title">HEADCOUNT MODEL${extra.dept ? " · " + extra.dept : ""}</div><div class="hm-sub">${range} · fully-loaded (base + ${benefitsPct}% benefits/taxes)${extra.dept ? " · one department (summary scoped)" : ""}</div></div>
     </div>
     ${versionBar(ctx, extra)}
     ${dash}

@@ -542,4 +542,11 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    name: "2026_07_02_022_plan_assumptions",
+    up(db) {
+      // Directive 4.0: per-plan assumptions/drivers (YoY salary growth, benefits load, ...).
+      db.exec(`ALTER TABLE plan_versions ADD COLUMN assumptions_json TEXT NOT NULL DEFAULT '{}';`);
+    },
+  },
 ];

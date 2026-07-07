@@ -23,3 +23,12 @@ export function setPlanHires(db, id, hires) {
 
 export const deletePlan = (db, id) =>
   db.prepare("DELETE FROM plan_versions WHERE id = ?").run(Number(id));
+
+export function planAssumptions(plan) {
+  if (!plan) return {};
+  try { const a = JSON.parse(plan.assumptions_json || "{}"); return a && typeof a === "object" ? a : {}; } catch { return {}; }
+}
+
+export function setPlanAssumptions(db, id, obj) {
+  db.prepare("UPDATE plan_versions SET assumptions_json = ? WHERE id = ?").run(JSON.stringify(obj || {}), Number(id));
+}
