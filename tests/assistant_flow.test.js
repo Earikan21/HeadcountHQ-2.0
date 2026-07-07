@@ -90,12 +90,13 @@ test("floating widget endpoint /assistant/ask returns a JSON answer", async () =
   assert.ok(data.answer && data.answer.length > 0, "should return an answer");
 });
 
-test("AI scenario models what-if hires on the financial model", async () => {
+test("AI adds planned hires to a plan version", async () => {
   const c = await loginAda();
-  const res = await c.post("/model/ai-scenario", { description: "hire 2 AEs in Sales starting June 2027 at $120k" });
-  const page = await res.text();
-  assert.match(page, /Scenario hires/);
-  assert.match(page, /AI modeled/);
+  const created = await c.post("/model/versions", { name: "Board plan" });
+  const id = created.headers.get("location").match(/version=(\d+)/)[1];
+  await c.post(`/model/versions/${id}/ai`, { description: "hire 2 AEs in Sales starting June 2027 at $120k" });
+  const page = await (await c.get("/model?version=" + id)).text();
+  assert.match(page, /class="prow scn"/);
   assert.match(page, /AE/);
 });
 

@@ -25,40 +25,48 @@ before(async () => {
 });
 after(async () => { await srv.close(); });
 
-test("live model renders the month-by-month headcount build from current data", async () => {
+test("model shows names, a mini dashboard, and cost cells", async () => {
   const page = await (await admin.get("/model")).text();
   assert.match(page, /HEADCOUNT MODEL/);
   assert.match(page, /class="sheet model"/);
-  assert.match(page, /Employee roster/);
+  assert.match(page, /Current headcount/);   // mini dashboard (item 10)
+  assert.match(page, /Dana Lee/);             // names (item 3)
   assert.match(page, /Engineering/);
-  assert.match(page, /Sales/);
-  assert.match(page, /Total fully-loaded cost/i);
-  assert.match(page, /Annual summary/i);
-  assert.match(page, /class="mc on"/);          // active-month flag
-  assert.match(page, /Year-End Headcount/);
+  assert.match(page, /Annual summary/);
 });
 
-test("nav links to the live financial model", async () => {
-  const home = await (await admin.get("/")).text();
-  assert.match(home, /href="\/model"[^>]*>Financial model</);
-});
-
-test("zoom controls + scenario planning render on the model", async () => {
+test("period toggle, filters, and zoom controls render", async () => {
   const page = await (await admin.get("/model")).text();
   assert.match(page, /id="zoom-in"/);
   assert.match(page, /\/static\/model\.js/);
-  assert.match(page, /Scenario planning/);
+  assert.match(page, /class="ptab[^"]*"[^>]*>Monthly/);
+  assert.match(page, />Quarterly</);
+  assert.match(page, /id="f-search"/);
+  assert.match(page, /id="f-dept"/);
+  assert.match(page, /id="f-min"/);
 });
 
-test("a manual scenario hire appears in a what-if band", async () => {
-  const res = await admin.post("/model", { scn_department: "Sales", scn_role: "AE", scn_start: "2027-06", scn_salary: "120000", scn_count: "2" });
-  const page = await res.text();
-  assert.match(page, /Scenario hires/);
-  assert.match(page, /AE/);
+test("quarterly view aggregates columns", async () => {
+  const page = await (await admin.get("/model?period=quarter")).text();
+  assert.match(page, /class="ptab on"[^>]*>Quarterly/);
+  assert.match(page, /Q[1-4] '/);
 });
 
-test("a client can view the live model too (read-only)", async () => {
-  const res = await client.get("/model");
-  assert.equal(res.status, 200);
-  assert.match(await res.text(), /class="sheet model"/);
+test("admin sees add-person + duplicate controls; duplicating adds headcount", async () => {
+  const page = await (await admin.get("/model")).text();
+  assert.match(page, /href="\/roster\/new"/);
+  assert.match(page, /\/roster\/duplicate\//);
+  const before = srv.db.prepare("SELECT COUNT(*) AS n FROM employees").get().n;
+  const empId = srv.db.prepare("SELECT id FROM employees LIMIT 1").get().id;
+  const res = await admin.post("/roster/duplicate/" + empId, {});
+  assert.equal(res.status, 303);
+  const after = srv.db.prepare("SELECT COUNT(*) AS n FROM employees").get().n;
+  assert.equal(after, before + 1);
+});
+
+test("a client can view the model (read-only, no admin controls)", async () => {
+  const page = await (await client.get("/model")).text();
+  assert.match(page, /class="sheet model"/);
+  assert.ok(!page.includes("/roster/duplicate/"), "client sees no duplicate controls");
+  assert.ok(!page.includes('href="/roster/new"'), "client sees no add-person control");
 });
