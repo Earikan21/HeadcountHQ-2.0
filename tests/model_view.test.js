@@ -1,6 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startTestServer, makeClient } from "./helpers.js";
+import { buildAssistantContext } from "../src/routes/assistant.js";
 
 const CSV = "Employee ID,Name,Department,Job Title,Compensation,Unit,Status\nE-1,Dana Lee,Engineering,Engineer,120000,annual,active\nE-2,Mara Ito,Sales,AE,90000,annual,active\n";
 const MAP = { map_employee_id: "Employee ID", map_name: "Name", map_department: "Department", map_job_title: "Job Title", map_compensation_amount: "Compensation", map_compensation_unit: "Unit", map_employment_status: "Status" };
@@ -25,11 +26,18 @@ before(async () => {
 });
 after(async () => { await srv.close(); });
 
+test("assistant context exposes per-department average pay (aggregate)", () => {
+  const c = buildAssistantContext(srv.db);
+  assert.match(c, /Engineering:.*avg base/);
+  assert.match(c, /Base salary distribution/);
+  assert.match(c, /fully-loaded cost by year/);
+});
+
 test("model shows names, a mini dashboard, and cost cells", async () => {
   const page = await (await admin.get("/model")).text();
   assert.match(page, /HEADCOUNT MODEL/);
-  assert.match(page, /class="sheet model"/);
-  assert.match(page, /Current headcount/);   // mini dashboard (item 10)
+  assert.match(page, /class="sheet model outline"/);
+  assert.match(page, /Headcount now/);   // mini dashboard (item 10)
   assert.match(page, /Dana Lee/);             // names (item 3)
   assert.match(page, /Engineering/);
   assert.match(page, /Annual summary/);
@@ -64,9 +72,16 @@ test("admin sees add-person + duplicate controls; duplicating adds headcount", a
   assert.equal(after, before + 1);
 });
 
+test("collapsible department rows and year columns render", async () => {
+  const page = await (await admin.get("/model")).text();
+  assert.match(page, /class="grptoggle"/);
+  assert.match(page, /class="ytoggle"/);
+  assert.match(page, /class="ygrp"/);
+});
+
 test("a client can view the model (read-only, no admin controls)", async () => {
   const page = await (await client.get("/model")).text();
-  assert.match(page, /class="sheet model"/);
+  assert.match(page, /class="sheet model outline"/);
   assert.ok(!page.includes("/roster/duplicate/"), "client sees no duplicate controls");
   assert.ok(!page.includes('href="/roster/new"'), "client sees no add-person control");
 });
