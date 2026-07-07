@@ -11,6 +11,8 @@ import { getFinancials } from "../repos/planning.js";
 import { mixVsTarget } from "../domain/philosophy.js";
 import { clientFromConfig, answerQuestion } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
+import { buildHeadcountModel } from "../domain/model.js";
+import { listPlans } from "../repos/plans.js";
 
 const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured);
 
@@ -85,24 +87,63 @@ export function buildAssistantContext(db) {
   for (const [k, v] of Object.entries(targets)) targetByDept[k] = v.target_pct;
   const mix = mixVsTarget(actualByDept, targetByDept);
 
+  // per-department compensation (aggregate — averages, totals, and ranges; never individuals)
+  const compByDept = {};
+  for (const e of emps) {
+    const d = e.department_name || "(none)";
+    const sal = e.annual_salary || 0;
+    if (!compByDept[d]) compByDept[d] = { sum: 0, n: 0, min: Infinity, max: 0 };
+    const cd = compByDept[d];
+    cd.sum += sal; cd.n += 1;
+    if (sal > 0) { cd.min = Math.min(cd.min, sal); cd.max = Math.max(cd.max, sal); }
+  }
   const deptLines = roll.departments.map((d) => {
     const m = mix.find((x) => x.name === d.department) || {};
-    const t = m.targetPct != null
-      ? `, ${m.actualPct}% of headcount vs ${m.targetPct}% target (${m.variance > 0 ? "+" : ""}${m.variance})`
-      : "";
-    return `- ${d.department}: ${d.active} filled, ${d.approved} approved${t}`;
+    const t = m.targetPct != null ? `, ${m.actualPct}% of headcount vs ${m.targetPct}% target (${m.variance > 0 ? "+" : ""}${m.variance})` : "";
+    const c = compByDept[d.department];
+    const comp = c && c.n ? `, avg base ${money(Math.round(c.sum / c.n))}, range ${money(c.min === Infinity ? 0 : c.min)}\u2013${money(c.max)}, dept base total ${money(Math.round(c.sum))}, loaded ${money(Math.round(c.sum * mult))}` : "";
+    return `- ${d.department}: ${d.active} filled, ${d.approved} approved${t}${comp}`;
   }).join("\n");
 
+  // company-wide salary distribution (aggregate)
+  const sals = emps.map((e) => e.annual_salary || 0).filter((x) => x > 0).sort((a, b) => a - b);
+  const avgSal = sals.length ? Math.round(sals.reduce((a, b) => a + b, 0) / sals.length) : 0;
+  const median = sals.length ? sals[Math.floor(sals.length / 2)] : 0;
+
+  // employment type / status breakdown
+  const byType = {}, byStatus = {};
+  for (const e of emps) {
+    const ty = e.employee_type || "unspecified"; byType[ty] = (byType[ty] || 0) + 1;
+    const st = e.employment_status || "unspecified"; byStatus[st] = (byStatus[st] || 0) + 1;
+  }
+  const typeLine = Object.entries(byType).map(([k, v]) => `${v} ${k}`).join(", ") || "n/a";
+  const statusLine = Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(", ") || "n/a";
+
+  // forward financial model — fully-loaded cost by year (built from start dates, 5-year horizon)
+  let modelLines = "  (no roster yet)";
+  try {
+    const model = buildHeadcountModel({ employees: emps, loadedMultiplier: mult });
+    if (model.years.length) modelLines = model.years.map((y) => `  - ${y.year}: end headcount ${y.yearEndHc}, fully-loaded ${money(y.totalCost)}, avg loaded/head ${money(y.avgCostPerHead)}`).join("\n");
+  } catch { /* ignore */ }
+
+  let planNames = [];
+  try { planNames = listPlans(db).map((p) => p.name); } catch { /* ignore */ }
+
   return [
-    `Company stage: ${s.company_phase}; industry: ${s.industry || "general"}.`,
-    `Headcount: ${roll.totals.active} filled seats, ${roll.totals.approved} approved (includes open reqs).`,
-    `Total base comp: ${money(totalBase)}; fully-loaded (~${mult}x): ${money(loaded)}.`,
-    `Company headcount budget: ${rec.allocation.headcount.cap || "not set"} (allocated ${rec.allocation.headcount.allocated}).`,
-    `Company money budget: ${rec.allocation.money.cap ? money(rec.allocation.money.cap) : "not set"}; committed ${money(rec.company.money.committed)}.`,
-    fin.cash_balance ? `Cash: ${money(fin.cash_balance)}; monthly burn: ${money(fin.monthly_burn)}; runway: ${runway != null ? runway + " months" : "n/a"}.` : `Financials (cash/burn) not entered yet.`,
+    `Company stage: ${s.company_phase}; industry: ${s.industry || "general"}. Fully-loaded multiplier: ${mult}x (base + benefits/taxes).`,
+    `Headcount: ${roll.totals.active} filled, ${roll.totals.approved} approved, ${roll.totals.open} open. Types: ${typeLine}. Status: ${statusLine}.`,
+    `Company base comp ${money(totalBase)}; fully-loaded ${money(loaded)}. Base salary distribution: min ${money(sals[0] || 0)}, avg ${money(avgSal)}, median ${money(median)}, max ${money(sals[sals.length - 1] || 0)}.`,
+    `Headcount budget: ${rec.allocation.headcount.cap || "not set"} (allocated ${rec.allocation.headcount.allocated}). Money budget: ${rec.allocation.money.cap ? money(rec.allocation.money.cap) : "not set"}; committed ${money(rec.company.money.committed)}.`,
+    fin.cash_balance ? `Cash ${money(fin.cash_balance)}; monthly burn ${money(fin.monthly_burn)}; runway ${runway != null ? runway + " months" : "n/a"}.` : `Financials (cash/burn) not entered yet.`,
+    planNames.length ? `Saved plan versions: ${planNames.join(", ")}.` : ``,
     ``,
-    `Departments (filled / approved / mix vs target):`,
+    `Departments (filled / approved / target mix / compensation):`,
     deptLines || "(no departments yet)",
+    ``,
+    `Financial model — fully-loaded cost by year:`,
+    modelLines,
+    ``,
+    `You have ALL aggregate figures above, including per-department average and range of pay, salary distribution, budgets, runway, and the year-by-year model. You do NOT have individual salaries tied to a specific person's name — decline only that.`,
   ].join("\n");
 }
 

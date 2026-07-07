@@ -318,3 +318,13 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .plan-editor .scn-ai,.plan-editor .scn-manual{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
 .plan-editor .scn-ai input{flex:1;min-width:240px}
 .plan-editor input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
+
+/* Directive 4.0 — Excel-style outline (collapsible rows + columns) */
+.sheet.outline .grp td{background:#f1f4fb}
+.sheet.outline .grp .grphead{font-weight:600}
+.sheet.outline .total-grp td{background:#e7ecf7;font-weight:800}
+.grphead{position:sticky;left:0}
+.grptoggle,.ytoggle{border:none;background:none;cursor:pointer;font-size:12px;color:var(--brand-ink);font-weight:800;padding:0 5px;line-height:1}
+.ytoggle{color:#fff}
+.sheet.outline thead th.ygrp{text-align:center;background:#1e2a4a;color:#fff;border-left:2px solid #33406a;font-size:11px}
+.sheet.outline .prow td.rowhead{padding-left:20px}

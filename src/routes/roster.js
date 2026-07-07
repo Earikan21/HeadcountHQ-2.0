@@ -133,7 +133,7 @@ export function registerRosterRoutes(router) {
     if (!requirePermission(ctx, canImportRoster)) return;
     ctx.html(200, uploadPage(ctx, {}));
   });
-  router.post("/roster/import", (ctx) => {
+  router.post("/roster/import", async (ctx) => {
     if (!requirePermission(ctx, canImportRoster)) return;
     const file = ctx.files.file;
     if (!file || !file.data || !file.data.length) {
@@ -150,6 +150,19 @@ export function registerRosterRoutes(router) {
     const { mapping } = R.autoMap(headers);
     const batch = createBatch(ctx.db, { filename: file.filename, matrix, headerRow, mapping, createdBy: ctx.user.id });
     logAudit(ctx.db, { userId: ctx.user.id, action: "import.uploaded", entity: "import_batch", entityId: batch.id, detail: { filename: file.filename, rows: batch.row_count } });
+    // Auto-run AI column mapping when AI is configured — no button needed.
+    if (aiReady(ctx)) {
+      try {
+        const full = getBatch(ctx.db, batch.id);
+        const client = clientFromConfig(ctx.config);
+        const res = await suggestMapping({ headers: full.headers, rows: full.rawRows, client });
+        updateBatchMapping(ctx.db, batch.id, res.mapping);
+        recordImportRun(ctx.db, { batchId: batch.id, userId: ctx.user.id, phase: "mapping", usedAi: res.source === "ai", provider: ctx.config.AI_IMPORT_PROVIDER, suggestionCount: Object.values(res.mapping).filter(Boolean).length });
+        return ctx.redirect(`/roster/import/${batch.id}/map?ai=${res.source === "ai" ? 1 : 0}`);
+      } catch (e) {
+        console.error(`[ai-import] auto-map failed: ${e && e.message ? e.message : e}`);
+      }
+    }
     ctx.redirect(`/roster/import/${batch.id}/map`);
   });
 
@@ -391,13 +404,7 @@ function mapPage(ctx, { batch, errors }) {
   const frNotice = frParam === "failed"
     ? html`<div class="flash warn">AI full read couldn't interpret that file. Try fixing the header row above, or map the columns manually.</div>`
     : "";
-  const aiPanel = aiReady(ctx)
-    ? html`<form method="post" action="/roster/import/${batch.id}/ai-map" class="aiassist">
-        ${csrfField(ctx)}
-        <div><b>✨ Suggest mappings with AI</b><p class="muted small" style="margin:2px 0 0">Sends only your column <i>names</i> and types — never names, salaries, or any row.</p></div>
-        <button class="btn ghost sm" type="submit">Analyze columns</button>
-      </form>`
-    : "";
+  const aiPanel = ""; // AI mapping now runs automatically on upload (Directive 4.0)
   const fullReadPanel = aiFullReady(ctx)
     ? html`<form method="post" action="/roster/import/${batch.id}/fullread" class="aiassist warn-assist">
         ${csrfField(ctx)}

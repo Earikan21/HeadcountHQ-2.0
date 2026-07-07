@@ -35,9 +35,10 @@ export function deriveWindow(employees, now = new Date()) {
   for (const e of employees) { const p = parseMonth(e.start_date); if (p) starts.push(absOf(p.year, p.month0)); }
   const nowAbs = absOf(now.getFullYear(), now.getMonth());
   const startAbs = starts.length ? Math.min(...starts, nowAbs) : absOf(now.getFullYear(), 0);
-  const endAbs = Math.max(nowAbs, ...(starts.length ? starts : [nowAbs])) + 12;
+  // Look back to the earliest start, and forward FIVE years (60 months) from now.
+  const endAbs = Math.max(nowAbs + 60, ...(starts.length ? starts.map((a) => a + 12) : [nowAbs + 60]));
   let months = endAbs - startAbs + 1;
-  months = Math.max(12, Math.min(72, months));
+  months = Math.max(24, Math.min(132, months));
   return { start: { year: Math.floor(startAbs / 12), month0: startAbs % 12 }, months };
 }
 

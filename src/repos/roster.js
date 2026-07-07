@@ -75,13 +75,14 @@ export function upsertDepartmentByName(db, name) {
 // ---- employees + compensation ----
 export function upsertEmployee(db, row, departmentId) {
   const info = db.prepare(
-    `INSERT INTO employees (employee_ext_id, name, department_id, job_title, manager, employee_type, employment_status, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO employees (employee_ext_id, name, department_id, job_title, manager, employee_type, employment_status, start_date, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(workspace_id, employee_ext_id) DO UPDATE SET
        name=excluded.name, department_id=excluded.department_id, job_title=excluded.job_title,
        manager=excluded.manager, employee_type=excluded.employee_type,
-       employment_status=excluded.employment_status, updated_at=datetime('now')`
-  ).run(row.employee_id, row.name, departmentId, row.job_title, row.manager, row.employee_type, row.employment_status);
+       employment_status=excluded.employment_status,
+       start_date=COALESCE(excluded.start_date, employees.start_date), updated_at=datetime('now')`
+  ).run(row.employee_id, row.name, departmentId, row.job_title, row.manager, row.employee_type, row.employment_status, row.start_date || null);
   // fetch id (lastInsertRowid is 0 on update path in some drivers)
   const emp = db.prepare("SELECT id FROM employees WHERE workspace_id = 1 AND employee_ext_id = ?").get(row.employee_id);
   const empId = emp.id;

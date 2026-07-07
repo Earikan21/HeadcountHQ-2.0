@@ -19,6 +19,7 @@ export const SCHEMA = [
   { key: "manager",             label: "Manager",             required: false, syn: ["manager","managername","reportsto","supervisor","managers"] },
   { key: "employee_type",       label: "Employee Type",       required: false, syn: ["employeetype","emptype","workertype","type","classification","fteclass"] },
   { key: "employment_status",   label: "Employment Status",   required: false, syn: ["employmentstatus","status","empstatus","activestatus","workerstatus"] },
+  { key: "start_date",          label: "Start date",          required: false, syn: ["startdate","start","hiredate","datehired","dateofhire","doh","hired","joindate","joined","joiningdate","begindate","tenurestart","senioritydate","originalhiredate"] },
 ];
 
 export const DEFAULT_ASSUMPTIONS = { hoursPerYear: 2080, daysPerYear: 260, weeksPerYear: 52 };
@@ -141,6 +142,16 @@ export function band(annual, width = 25000) {
  * Build the canonical dataset from raw rows + a column mapping.
  * Returns { rows, summary }. Each row has _issues, _ok, _status, annual_salary.
  */
+/** Normalize a messy date string to YYYY-MM-DD, or null. */
+export function normalizeDate(v) {
+  if (v == null || String(v).trim() === "") return null;
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
 export function buildCanonical(rawRows, mapping, assumptions, opts = {}) {
   assumptions = { ...DEFAULT_ASSUMPTIONS, ...(assumptions || {}) };
   const get = (row, key) => (mapping[key] ? row[mapping[key]] : undefined);
@@ -160,6 +171,7 @@ export function buildCanonical(rawRows, mapping, assumptions, opts = {}) {
     const amount = parseAmount(rawAmount);
     const unitKey = normUnit(get(raw, "compensation_unit")) || "annual";
     const status = normStatus(get(raw, "employment_status"));
+    const startDate = normalizeDate(get(raw, "start_date"));
     const annual = toAnnual(amount, unitKey, assumptions);
 
     if (!id) issues.push({ level: "error", field: "employee_id", msg: "Missing Employee ID" });
@@ -197,6 +209,7 @@ export function buildCanonical(rawRows, mapping, assumptions, opts = {}) {
       compensation_amount: amount,
       compensation_unit: unitKey,
       annual_salary: annual,
+      start_date: startDate,
       _status: status,
       _issues: issues,
       _ok: !hasError,

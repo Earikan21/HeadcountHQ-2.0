@@ -1,8 +1,8 @@
 /**
- * Live, in-app spreadsheet view of the headcount financial model (Directive 4.0):
- * a mini dashboard, month/quarter/year period toggle, a sortable + filterable
- * roster with fully-loaded cost per period, department roll-ups, and an annual
- * summary. Rendered from `buildHeadcountModel` over the live roster.
+ * Live, in-app spreadsheet financial model (Directive 4.0): mini dashboard,
+ * month/quarter/year period toggle, plan versions, a sortable + filterable roster
+ * with fully-loaded cost per period, and Excel-style collapsible rows (by
+ * department) and columns (by year). Rendered from `buildHeadcountModel`.
  */
 import { html, raw } from "../html.js";
 import { renderPage, csrfField, money, moneyShort } from "./ui.js";
@@ -12,6 +12,27 @@ import { periodBuckets, periodize } from "../domain/model.js";
 const n0 = (v) => Math.round(Number(v) || 0).toLocaleString("en-US");
 const pctChg = (a, b) => (b ? Math.round(((a - b) / b) * 1000) / 10 : 0);
 const kpi = (label, val, sub = "") => html`<div class="kpi"><div class="lbl">${label}</div><div class="val">${val}</div>${sub ? html`<div class="lbl">${sub}</div>` : ""}</div>`;
+
+/** Group the display buckets by calendar year, keeping their positions. */
+function yearGroupsOf(cols, buckets) {
+  const groups = [];
+  buckets.forEach((b, i) => {
+    const yr = cols[b.idxs[0]].year;
+    let g = groups[groups.length - 1];
+    if (!g || g.year !== yr) { g = { year: yr, pos: [] }; groups.push(g); }
+    g.pos.push(i);
+  });
+  return groups;
+}
+
+/** Cost cells for one row across all year-groups: bucket cells + a hidden year-total. */
+function yearCells(perBucket, groups) {
+  return groups.map((g) => {
+    const cells = g.pos.map((i) => raw(`<td class="mc" data-yb="${g.year}" data-v="${Math.round(perBucket[i])}">${perBucket[i] ? moneyShort(perBucket[i]) : ""}</td>`));
+    const tot = g.pos.reduce((a, i) => a + perBucket[i], 0);
+    return html`${cells}${raw(`<td class="mc ytot" data-year="${g.year}" data-v="${Math.round(tot)}" hidden>${tot ? moneyShort(tot) : ""}</td>`)}`;
+  });
+}
 
 function versionBar(ctx, extra) {
   const plans = extra.plans || [];
@@ -30,7 +51,7 @@ function planEditor(ctx, extra) {
   if (!cur || !extra.canEdit) return "";
   const hires = extra.hires || [];
   const rows = hires.length ? hires.map((h, i) => html`<tr>
-      <td><b>${h.count}\u00d7 ${h.role}</b></td><td>${h.department}</td><td>${h.start_month || "from start"}</td><td class="right">${money(h.annual_salary)}</td>
+      <td><b>${h.count}× ${h.role}</b></td><td>${h.department}</td><td>${h.start_month || "from start"}</td><td class="right">${money(h.annual_salary)}</td>
       <td><form method="post" action="/model/versions/${cur.id}/hire/${i}/delete" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">remove</button></form></td>
     </tr>`) : html`<tr><td colspan="5" class="muted">No planned hires yet — add one below.</td></tr>`;
   return html`<section class="card plan-editor">
@@ -56,26 +77,32 @@ export function financialModelPage(ctx, model, extra = {}) {
   const isAdmin = canImportRoster(ctx.user);
   const period = ["month", "quarter", "year"].includes(extra.period) ? extra.period : "month";
   const buckets = periodBuckets(cols, period);
+  const groups = yearGroupsOf(cols, buckets);
+  const LABELS = 8; // label columns before the period columns
 
-  // current-month index within the window, for the dashboard
   const now = new Date();
   let nowIdx = cols.findIndex((c) => c.year === now.getFullYear() && c.month0 === now.getMonth());
-  if (nowIdx < 0) nowIdx = cols.length - 1;
+  if (nowIdx < 0) nowIdx = Math.max(0, cols.length - 1);
+  const nowLabel = cols.length ? cols[nowIdx].fullLabel : "";
   const curHc = monthlyHeadcount[nowIdx] || 0;
-  const endHc = monthlyHeadcount[cols.length - 1] || 0;
-  const runRate = (totalMonthlyCost[nowIdx] || 0) * 12;
+  const thisYear = cols.length ? cols[nowIdx].year : now.getFullYear();
+  const thisYearCost = cols.reduce((a, c, i) => a + (c.year === thisYear ? totalMonthlyCost[i] : 0), 0);
+  const endI = Math.min(nowIdx + 11, cols.length - 1);
+  const next12Cost = totalMonthlyCost.slice(nowIdx, endI + 1).reduce((a, b) => a + b, 0);
+  const hc12 = monthlyHeadcount[Math.min(nowIdx + 12, cols.length - 1)] || 0;
+  const netNew = hc12 - curHc;
   const avgHead = curHc ? Math.round((totalMonthlyCost[nowIdx] || 0) / curHc) : 0;
 
   const dash = html`<div class="kpis model-kpis">
-    ${kpi("Current headcount", n0(curHc))}
-    ${kpi("Planned (end of range)", n0(endHc), endHc !== curHc ? `${endHc > curHc ? "+" : ""}${endHc - curHc} vs today` : "")}
-    ${kpi("Annual run-rate", money(runRate), "fully loaded")}
-    ${kpi("Avg loaded / head", money(avgHead), "per month")}
-    ${kpi("Departments", n0(departments.length))}
-    ${kpi("Benefits load", benefitsPct + "%", "")}
+    ${kpi("Headcount now", n0(curHc), "as of " + nowLabel)}
+    ${kpi(`${thisYear} spend`, money(thisYearCost), "fully loaded, this year")}
+    ${kpi("Next 12-mo cost", money(next12Cost), "from " + nowLabel)}
+    ${kpi("Net new (12 mo)", `${netNew >= 0 ? "+" : ""}${n0(netNew)}`, "planned change")}
+    ${kpi("Avg loaded / head", money(avgHead), "per month, now")}
+    ${kpi("Departments", n0(departments.length), benefitsPct + "% benefits load")}
   </div>`;
 
-  const periodTab = (p, label) => raw(`<a class="ptab ${p === period ? "on" : ""}" href="/model?period=${p}">${label}</a>`);
+  const periodTab = (p, label) => raw(`<a class="ptab ${p === period ? "on" : ""}" href="/model?period=${p}${extra.current ? "&version=" + extra.current.id : ""}">${label}</a>`);
   const controls = html`<div class="model-controls">
     <div class="ptabs">${periodTab("month", "Monthly")}${periodTab("quarter", "Quarterly")}${periodTab("year", "Yearly")}</div>
     <input id="f-search" type="search" placeholder="Search name / role / dept" aria-label="Search">
@@ -87,12 +114,13 @@ export function financialModelPage(ctx, model, extra = {}) {
     <a class="btn ghost sm" href="/budgets/export.csv">Export CSV</a>
   </div>`;
 
-  const monthHead = buckets.map((b, i) => raw(`<th class="mc" data-sort="p${i}" data-type="num">${b.label}</th>`));
-  const sortableHead = (key, label, type, cls = "") => raw(`<th class="sortable ${cls}" data-sort="${key}" data-type="${type}">${label}</th>`);
+  const sortableHead = (key, label, type, cls = "") => raw(`<th class="sortable ${cls}" rowspan="2" data-sort="${key}" data-type="${type}">${label}</th>`);
+  const yearGroupHead = groups.map((g) => raw(`<th class="ygrp" data-year="${g.year}" data-span="${g.pos.length + 1}" colspan="${g.pos.length + 1}"><button type="button" class="ytoggle" data-year="${g.year}" aria-label="Collapse ${g.year}">–</button> ${g.year}</th>`));
+  const bucketHead = groups.map((g) => html`${g.pos.map((i) => raw(`<th class="mc" data-yb="${g.year}">${buckets[i].label}</th>`))}${raw(`<th class="mc ytot" data-year="${g.year}" hidden>${g.year} total</th>`)}`);
 
   const prowFor = (r) => {
     const per = periodize(r.monthlyCost, buckets, "sum");
-    return html`<tr class="prow ${r.scenario ? "scn" : ""}" data-name="${(r.name || "").toLowerCase()}" data-role="${(r.role || "").toLowerCase()}" data-dept="${r.department}" data-status="${(r.status || '').toLowerCase()}" data-start="${r.startDate || ''}" data-salary="${Math.round(r.annualBase)}" data-loaded="${Math.round(r.loadedMonthly)}">
+    return html`<tr class="prow ${r.scenario ? "scn" : ""}" data-dept="${r.department}" data-name="${(r.name || "").toLowerCase()}" data-role="${(r.role || "").toLowerCase()}" data-status="${(r.status || "").toLowerCase()}" data-start="${r.startDate || ""}" data-salary="${Math.round(r.annualBase)}" data-loaded="${Math.round(r.loadedMonthly)}">
       <td class="rowhead">${r.name || "—"}</td>
       <td>${r.department}</td>
       <td>${r.role}</td>
@@ -101,36 +129,42 @@ export function financialModelPage(ctx, model, extra = {}) {
       <td class="num">${n0(r.annualBase)}</td>
       <td class="num">${n0(r.loadedMonthly)}</td>
       ${isAdmin && r.id != null ? html`<td class="act"><form method="post" action="/roster/duplicate/${r.id}" class="inline">${csrfField(ctx)}<button class="linklike" type="submit" title="Duplicate this role">Duplicate</button></form></td>` : html`<td class="act"></td>`}
-      ${per.map((v) => raw(`<td class="mc" data-v="${Math.round(v)}">${v ? moneyShort(v) : ""}</td>`))}
+      ${yearCells(per, groups)}
     </tr>`;
   };
 
-  const rosterTable = html`<table id="model-sheet" class="sheet model">
-    <thead><tr>
-      ${sortableHead("name", "Name", "text", "rowhead")}
-      ${sortableHead("dept", "Department", "text")}
-      ${sortableHead("role", "Role / Title", "text")}
-      ${sortableHead("status", "Status", "text")}
-      ${sortableHead("start", "Starts", "text", "num")}
-      ${sortableHead("salary", "Annual Base", "num", "num")}
-      ${sortableHead("loaded", "Loaded Mo", "num", "num")}
-      <th></th>
-      ${monthHead}
-    </tr></thead>
-    <tbody id="roster-body">
-      ${roster.length ? roster.map(prowFor) : html`<tr><td class="rowhead">—</td><td colspan="${7 + buckets.length}" class="muted">No roster yet. Import a roster to build the model.</td></tr>`}
-    </tbody>
-  </table>`;
+  const grandTotal = html`<tr class="grp total-grp">
+    <td class="grphead" colspan="${LABELS}"><b>Total fully-loaded cost</b></td>
+    ${yearCells(periodize(totalMonthlyCost, buckets, "sum"), groups)}
+  </tr>`;
 
-  const costRow = (label, series, cls = "") => {
-    const per = periodize(series, buckets, "sum");
-    return html`<tr class="${cls}"><td class="rowhead">${label}</td>${per.map((v) => raw(`<td class="num">${moneyShort(v)}</td>`))}</tr>`;
-  };
-  const totalsTable = html`<table class="sheet model totals">
-    <thead><tr><th class="rowhead">Fully-loaded cost</th>${buckets.map((b) => raw(`<th class="num">${b.label}</th>`))}</tr></thead>
-    <tbody>
-      ${costRow("Total", totalMonthlyCost, "hm-total")}
-      ${departments.map((d) => costRow(d, deptMonthlyCost[d]))}
+  const deptBlocks = departments.map((d) => {
+    const members = roster.filter((r) => r.department === d);
+    const sub = periodize(deptMonthlyCost[d], buckets, "sum");
+    const head = html`<tr class="grp" data-dept="${d}">
+      <td class="grphead" colspan="${LABELS}"><button type="button" class="grptoggle" data-dept="${d}" aria-label="Collapse ${d}">▾</button> <b>${d}</b> <span class="muted">(${members.length})</span></td>
+      ${yearCells(sub, groups)}
+    </tr>`;
+    return html`${head}${members.map(prowFor)}`;
+  });
+
+  const rosterTable = html`<table id="model-sheet" class="sheet model outline">
+    <thead>
+      <tr>
+        ${sortableHead("name", "Name", "text", "rowhead")}
+        ${sortableHead("dept", "Department", "text")}
+        ${sortableHead("role", "Role / Title", "text")}
+        ${sortableHead("status", "Status", "text")}
+        ${sortableHead("start", "Starts", "text")}
+        ${sortableHead("salary", "Annual Base", "num")}
+        ${sortableHead("loaded", "Loaded Mo", "num")}
+        <th rowspan="2"></th>
+        ${yearGroupHead}
+      </tr>
+      <tr>${bucketHead}</tr>
+    </thead>
+    <tbody id="roster-body">
+      ${roster.length ? html`${grandTotal}${deptBlocks}` : html`<tr><td class="rowhead">—</td><td colspan="${LABELS - 1 + buckets.length}" class="muted">No roster yet. Import a roster (include a start-date column) to build the model.</td></tr>`}
     </tbody>
   </table>`;
 
@@ -158,9 +192,8 @@ export function financialModelPage(ctx, model, extra = {}) {
     ${dash}
     ${controls}
     ${planEditor(ctx, extra)}
+    <p class="muted small" style="margin:0 0 8px">Tip: click a department (▾) to collapse its people, or a year (–) to collapse its columns. Sort by any header; filter above.</p>
     <div class="sheet-wrap">${rosterTable}</div>
-    <h2 style="margin:22px 0 8px">Monthly fully-loaded cost by department</h2>
-    <div class="sheet-wrap">${totalsTable}</div>
     ${summary}
     <script src="/static/model.js" defer></script>`;
   return renderPage(ctx, { title: "Financial model", body, active: "model" });
