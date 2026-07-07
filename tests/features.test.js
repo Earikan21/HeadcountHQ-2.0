@@ -46,9 +46,9 @@ test("nav omits hidden areas but keeps the consolidated + kept areas", async () 
   assert.ok(!/href="\/org"/.test(home), "org link hidden");
   assert.ok(!/href="\/planning"/.test(home), "planning link hidden");
   assert.ok(!/href="\/requests"/.test(home), "requests link hidden");
-  // kept
-  assert.match(home, /href="\/budgets"/);
-  assert.match(home, /href="\/philosophy"/);
+  // kept nav areas
+  assert.match(home, /href="\/roster"/);
+  assert.match(home, /href="\/model"/);
   assert.match(home, /href="\/audit"/);
 });
 

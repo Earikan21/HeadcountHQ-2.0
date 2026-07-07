@@ -18,7 +18,7 @@ test("empty workspace shows the welcome/setup screen instead of the zeros dashbo
   const home = await (await c.get("/")).text();
   assert.match(home, /Welcome, Ada/);
   assert.match(home, /Import your roster/);
-  assert.match(home, /Set your budget/);
+  assert.ok(!/Set your budget/.test(home), "budget setup step removed");
 });
 
 test("welcome can be dismissed to the dashboard with ?home=1", async () => {

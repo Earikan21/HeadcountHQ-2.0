@@ -57,3 +57,30 @@ test("annual summary rolls up per calendar year", () => {
   assert.equal(m.years[0].totalCost, 24000 * 12);
   assert.equal(m.years[0].yearEndHc, 1);
 });
+
+test("assumptions: YoY salary growth compounds future years, multiplier overrides", () => {
+  const one = [{ name: "A", department_name: "Eng", annual_salary: 120000, employment_status: "active" }];
+  const base = buildHeadcountModel({ employees: one, loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 36, now: new Date("2026-06-15") });
+  const grown = buildHeadcountModel({ employees: one, loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 36, now: new Date("2026-06-15"), assumptions: { salaryGrowthPct: 10 } });
+  const y = (m, yr) => m.years.find((x) => x.year === yr);
+  assert.equal(y(grown, 2026).totalCost, y(base, 2026).totalCost);        // now-year unchanged
+  assert.ok(y(grown, 2027).totalCost > y(base, 2027).totalCost);          // future grows
+  const ov = buildHeadcountModel({ employees: one, loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 12, assumptions: { loadedMultiplier: 1.5 } });
+  assert.equal(ov.benefitsPct, 50);                                       // override applied
+});
+
+test("assumptions: bonus %, hiring slippage, and one-time cost per hire", () => {
+  const one = [{ name: "A", department_name: "Eng", annual_salary: 120000, employment_status: "active", start_date: "2026-01-01" }];
+  const opts = { loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 24, now: new Date("2026-01-15") };
+  const base = buildHeadcountModel({ employees: one, ...opts });
+  // target bonus adds a % on top of loaded comp
+  const bonus = buildHeadcountModel({ employees: one, ...opts, assumptions: { bonusPct: 10 } });
+  assert.ok(Math.abs(bonus.roster[0].monthlyCost[0] - base.roster[0].monthlyCost[0] * 1.1) < 1);
+  // cost per hire is a one-time spike in the hire's start month
+  const cph = buildHeadcountModel({ employees: one, ...opts, assumptions: { costPerHire: 5000 } });
+  assert.equal(Math.round(cph.roster[0].monthlyCost[0] - base.roster[0].monthlyCost[0]), 5000);
+  // hiring slippage delays a planned (scenario) hire
+  const slip = buildHeadcountModel({ employees: [], loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 24, scenarioHires: [{ department: "Sales", role: "AE", start_month: "2026-03", annual_salary: 120000, count: 1 }], assumptions: { hiringSlipMonths: 2 } });
+  assert.equal(slip.roster[0].active[2], 0); // originally Mar
+  assert.equal(slip.roster[0].active[4], 1); // slipped +2 -> May
+});

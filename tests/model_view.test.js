@@ -80,6 +80,15 @@ test("collapsible department rows and year columns render", async () => {
   assert.match(page, /class="ygrp"/);
 });
 
+test("model scopes to a single department (rows + summary)", async () => {
+  const page = await (await admin.get("/model?dept=Engineering")).text();
+  assert.match(page, /HEADCOUNT MODEL · Engineering/);
+  assert.match(page, /Dana Lee/);
+  assert.ok(!page.includes("Mara Ito"), "Sales employee excluded when scoped to Engineering");
+  assert.match(page, /Total fully-loaded cost/);
+  assert.match(page, /Annual summary/);
+});
+
 test("a client can view the model (read-only, no admin controls)", async () => {
   const page = await (await client.get("/model")).text();
   assert.match(page, /class="sheet model outline"/);
