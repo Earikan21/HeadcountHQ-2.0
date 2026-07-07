@@ -117,7 +117,7 @@ Rules:
 - annual_salary is a plain number (no $ or commas).
 - count is an integer (default 1).
 - Prefer an existing department name when the text clearly matches one.`;
-  const text = await client.chat(system, user, 600);
+  const text = await client.chat(system, user, 2000);
   const obj = parseJsonObject(text);
   const hires = Array.isArray(obj.hires) ? obj.hires : [];
   return hires.map((h) => ({

@@ -159,12 +159,37 @@ Only include titles you actually changed. Example: {"sr swe":"Senior Software En
 /** Extract the first balanced JSON object from a model reply. Throws if none. */
 export function parseJsonObject(text) {
   if (typeof text !== "string") throw new TypeError("expected string");
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) throw new Error("no JSON object found");
-  const obj = JSON.parse(text.slice(start, end + 1));
+  const t = text.replace(/```json/gi, "").replace(/```/g, "");
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start === -1) throw new Error("no JSON object found");
+  let body = (end > start ? t.slice(start, end + 1) : t.slice(start))
+    .replace(/}\s*{/g, "},{")       // missing commas between objects
+    .replace(/]\s*\[/g, "],[")
+    .replace(/,\s*([}\]])/g, "$1"); // trailing commas
+  let obj;
+  try { obj = JSON.parse(body); }
+  catch { obj = JSON.parse(balanceClose(body)); } // recover a truncated reply
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("not a JSON object");
   return obj;
+}
+
+/** Close a JSON string that was cut off mid-structure: drop a dangling trailing
+ *  element and append the brackets/quote needed to balance it. */
+function balanceClose(s) {
+  const stack = [];
+  let inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  let out = inStr ? s + '"' : s;
+  out = out.replace(/,\s*$/, "");
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === "{" ? "}" : "]";
+  return out;
 }
 
 // ---- network client -----------------------------------------------------

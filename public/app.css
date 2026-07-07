@@ -335,3 +335,8 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .ov-bar-track{height:8px;background:var(--line-2);border-radius:5px;overflow:hidden}
 .ov-bar-track i{display:block;height:8px;background:var(--brand);border-radius:5px}
 .ov-insights .plainlist li{margin:5px 0;font-size:13px}
+
+/* Directive 4.0 — keep the pinned first column above data cells while scrolling */
+.sheet .rowhead, .sheet .grphead{z-index:2}
+.sheet thead th{z-index:3}
+.sheet thead th.rowhead{z-index:4}
