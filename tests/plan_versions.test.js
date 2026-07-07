@@ -51,6 +51,21 @@ test("a plan carries assumptions (salary growth + load) that persist and render"
   assert.match(page, /Cost per hire/);
 });
 
+test("assumptions can be set per department + editor is collapsible with relocated search", async () => {
+  const created = await admin.post("/model/versions", { name: "Dept plan" });
+  const id = created.headers.get("location").match(/version=(\d+)/)[1];
+  // company default vs department override
+  await admin.post(`/model/versions/${id}/assumptions`, { dept: "Engineering", bonus_pct: "20" });
+  const stored = JSON.parse(srv.db.prepare("SELECT assumptions_json FROM plan_versions WHERE id=?").get(Number(id)).assumptions_json);
+  assert.equal(stored.byDept.Engineering.bonusPct, 20);
+  // scoped editor shows the override UI + collapsible sections + relocated search
+  const page = await (await admin.get(`/model?version=${id}&dept=Engineering`)).text();
+  assert.match(page, /Overrides for Engineering/);
+  assert.match(page, /class="plan-sect"/);
+  assert.match(page, /<summary>Hires/);
+  assert.match(page, /class="model-search"/);
+});
+
 test("multiple named versions coexist as subtabs", async () => {
   await admin.post("/model/versions", { name: "Base case" });
   const page = await (await admin.get("/model")).text();
