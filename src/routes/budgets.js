@@ -15,6 +15,7 @@ import { buildHeadcountModel } from "../domain/model.js";
 import { listEmployees } from "../repos/roster.js";
 import { clientFromConfig, parseScenarioHires } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
+import { listPlans, getPlan, createPlan, planHires, setPlanHires, deletePlan } from "../repos/plans.js";
 
 /** Money a department's headcount budget implies: current cost + midpoint of the
  *  expected cost of its still-unfilled budgeted positions. Idempotent. */
@@ -26,51 +27,89 @@ function impliedMoneyForDept(r) {
 }
 
 export function registerBudgetRoutes(router) {
-  // Live, in-app spreadsheet view of the financial model (read-only; admins + clients).
-  const renderModel = (ctx, scenarioHires = [], extra = {}) => {
+  // Live, in-app spreadsheet financial model with named plan versions (item 11).
+  const renderModel = (ctx, versionId = null, extra = {}) => {
+    const plans = listPlans(ctx.db);
+    const current = versionId ? getPlan(ctx.db, versionId) : null;
+    const hires = planHires(current);
     const employees = listEmployees(ctx.db, {});
     const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
-    const startYear = new Date().getFullYear();
-    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, startYear, months: 24, scenarioHires });
-    ctx.html(200, financialModelPage(ctx, model, { scenarioHires, aiReady: Boolean(ctx.config.aiImportConfigured), ...extra }));
+    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: hires });
+    ctx.html(200, financialModelPage(ctx, model, {
+      period: ctx.query.get("period"), plans, current, hires,
+      canEdit: canSetBudgets(ctx.user), aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
+    }));
+  };
+  const currentVersionId = (ctx) => {
+    const v = Number(ctx.query.get("version")) || null;
+    return v && getPlan(ctx.db, v) ? v : null;
   };
 
   router.get("/model", (ctx) => {
     if (!requirePermission(ctx, canViewBudgets)) return;
-    renderModel(ctx, []);
+    renderModel(ctx, currentVersionId(ctx));
   });
 
-  // Manual what-if: one scenario hire group from the form.
-  router.post("/model", (ctx) => {
-    if (!requirePermission(ctx, canViewBudgets)) return;
+  // Create a new named plan version.
+  router.post("/model/versions", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = createPlan(ctx.db, ctx.body.name || "New plan");
+    logAudit(ctx.db, { userId: ctx.user.id, action: "plan.created", entity: "plan_version", entityId: plan.id, detail: { name: plan.name } });
+    ctx.redirect(`/model?version=${plan.id}`);
+  });
+
+  router.post("/model/versions/:id/delete", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    deletePlan(ctx.db, Number(ctx.params.id));
+    ctx.redirect("/model");
+  });
+
+  // Add a planned hire to a version (manual form).
+  router.post("/model/versions/:id/hire", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
     const b = ctx.body;
-    const department = String(b.scn_department || "").trim();
-    const hires = [];
-    if (department && Number(b.scn_salary) > 0) {
+    if (String(b.scn_department || "").trim() && Number(b.scn_salary) > 0) {
+      const hires = planHires(plan);
       hires.push({
-        department, role: String(b.scn_role || "Scenario hire").trim(),
+        department: String(b.scn_department).trim(), role: String(b.scn_role || "Hire").trim(),
         start_month: /^\d{4}-\d{2}$/.test(String(b.scn_start || "")) ? b.scn_start : null,
         annual_salary: Number(b.scn_salary) || 0, count: Math.max(1, Number(b.scn_count) || 1),
       });
+      setPlanHires(ctx.db, plan.id, hires);
     }
-    renderModel(ctx, hires);
+    ctx.redirect(`/model?version=${plan.id}`);
   });
 
-  // AI what-if: parse a plain-English scenario into hires and model them.
-  router.post("/model/ai-scenario", async (ctx) => {
-    if (!requirePermission(ctx, canViewBudgets)) return;
+  router.post("/model/versions/:id/hire/:idx/delete", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const hires = planHires(plan);
+    const idx = Number(ctx.params.idx);
+    if (idx >= 0 && idx < hires.length) { hires.splice(idx, 1); setPlanHires(ctx.db, plan.id, hires); }
+    ctx.redirect(`/model?version=${plan.id}`);
+  });
+
+  // Add planned hires to a version from a plain-English description (AI).
+  router.post("/model/versions/:id/ai", async (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
     const description = String(ctx.body.description || "").trim();
-    if (!description) return renderModel(ctx, []);
-    if (!ctx.config.aiImportConfigured) return renderModel(ctx, [], { aiError: "Configure a provider key to use AI scenarios." });
+    if (!description || !ctx.config.aiImportConfigured) {
+      return renderModel(ctx, plan.id, { aiError: description ? "Configure a provider key to use AI." : null });
+    }
     try {
       const client = clientFromConfig(ctx.config);
-      const departments = listDepartments(ctx.db).map((d) => d.name);
-      const hires = await parseScenarioHires({ description, departments, client });
-      if (!hires.length) return renderModel(ctx, [], { aiError: "Couldn't turn that into a hire — name a department, count, start month, and salary." });
-      renderModel(ctx, hires, { aiNote: "AI modeled: " + hires.map((h) => `${h.count}× ${h.role} in ${h.department}`).join("; ") });
+      const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), client });
+      if (!parsed.length) return renderModel(ctx, plan.id, { aiError: "Couldn't turn that into a hire — name a department, count, start month, and salary." });
+      setPlanHires(ctx.db, plan.id, planHires(plan).concat(parsed));
+      ctx.redirect(`/model?version=${plan.id}`);
     } catch (e) {
-      console.error(`[model] ai-scenario failed: ${e && e.message ? e.message : e}`);
-      renderModel(ctx, [], { aiError: "The assistant couldn't model that just now — try again." });
+      console.error(`[model] ai plan failed: ${e && e.message ? e.message : e}`);
+      renderModel(ctx, plan.id, { aiError: "The assistant couldn't model that just now — try again." });
     }
   });
 

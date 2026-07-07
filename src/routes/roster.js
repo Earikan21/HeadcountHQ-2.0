@@ -107,6 +107,27 @@ export function registerRosterRoutes(router) {
     ctx.redirect(`/roster?msg=Onboarded+${encodeURIComponent(name)}`);
   });
 
+  // ---- Duplicate a person/role (adds headcount; admin only) ----
+  router.post("/roster/duplicate/:id", (ctx) => {
+    if (!requirePermission(ctx, canImportRoster)) return;
+    const src = ctx.db.prepare(
+      `SELECT e.*, c.annual_salary AS annual_salary FROM employees e
+         LEFT JOIN compensation c ON c.employee_id = e.id WHERE e.id = ?`
+    ).get(Number(ctx.params.id));
+    if (!src) return ctx.redirect("/model");
+    const extId = nextEmployeeId(ctx.db);
+    const row = {
+      employee_id: extId, name: (src.name || "Role") + " (copy)", job_title: src.job_title || "",
+      manager: src.manager || "", employee_type: src.employee_type || "",
+      employment_status: "active", compensation_amount: src.annual_salary, compensation_unit: "annual", annual_salary: src.annual_salary,
+    };
+    const empId = upsertEmployee(ctx.db, row, src.department_id);
+    const mult = getSettings(ctx.db).loaded_cost_multiplier;
+    ensureSeatForEmployee(ctx.db, { employeeId: empId, departmentId: src.department_id, title: src.job_title || "", loadedCost: loadedCostFn(src.annual_salary, mult) });
+    logAudit(ctx.db, { userId: ctx.user.id, action: "person.duplicated", entity: "employee", entityId: empId, detail: { from: src.id } });
+    ctx.redirect("/model?msg=Role+duplicated");
+  });
+
   // ---- Step 1: upload ----
   router.get("/roster/import", (ctx) => {
     if (!requirePermission(ctx, canImportRoster)) return;

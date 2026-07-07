@@ -519,4 +519,27 @@ export const MIGRATIONS = [
       db.exec(`ALTER TABLE users ADD COLUMN client_full INTEGER NOT NULL DEFAULT 0;`);
     },
   },
+  {
+    name: "2026_07_02_020_ai_on_by_default",
+    up(db) {
+      // Directive 4.0: AI assist fully enabled by default on first login.
+      db.exec(`UPDATE workspace_settings SET ai_import_enabled = 1, ai_assistant_enabled = 1 WHERE workspace_id = 1;`);
+    },
+  },
+  {
+    name: "2026_07_02_021_plan_versions",
+    up(db) {
+      // Directive 4.0 (item 11): named plan versions ("base case", "board plan", ...).
+      // Each stores a set of planned (scenario) hires as JSON, layered on the live roster.
+      db.exec(`
+        CREATE TABLE plan_versions (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          workspace_id INTEGER NOT NULL DEFAULT 1,
+          name         TEXT NOT NULL,
+          hires_json   TEXT NOT NULL DEFAULT '[]',
+          created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
 ];

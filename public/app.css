@@ -286,3 +286,35 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .sheet.model tr.scn td,.sheet .hm-section.scn td{background:#fff7ed}
 .sheet.model tr.scn td.rowhead{color:#9a3412}
 .sheet .hm-section.scn td{color:#9a3412;background:#fde9d3}
+
+/* Directive 4.0 — model dashboard, period toggle, controls, sortable/filter */
+.model-kpis{grid-template-columns:repeat(6,1fr);margin:14px 0}
+@media (max-width:1100px){.model-kpis{grid-template-columns:repeat(3,1fr)}}
+.model-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+.model-controls input,.model-controls select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
+.model-controls #f-search{min-width:200px}
+.ptabs{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.ptab{padding:7px 12px;font-size:13px;color:var(--ink-2);border-right:1px solid var(--line)}
+.ptab:last-child{border-right:none}
+.ptab:hover{background:var(--line-2);text-decoration:none}
+.ptab.on{background:var(--brand-soft);color:var(--brand-ink);font-weight:600}
+.sheet th.sortable.clickable{cursor:pointer;user-select:none}
+.sheet th.sortable:hover{color:var(--ink)}
+.sheet th.sortable[data-dir="asc"]::after{content:" ▲";font-size:9px}
+.sheet th.sortable[data-dir="desc"]::after{content:" ▼";font-size:9px}
+.sheet td.act{text-align:center}
+.sheet td.act .linklike{font-size:12px}
+.sheet.model td.mc{text-align:right;min-width:66px}
+.sheet.model td.mc[data-v="0"]{color:var(--muted)}
+
+/* Directive 4.0 — plan versioning */
+.version-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 4px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.vlabel{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-right:4px}
+.vtab{padding:6px 13px;border-radius:20px;font-size:13px;color:var(--ink-2);border:1px solid var(--line)}
+.vtab:hover{background:var(--line-2);text-decoration:none}
+.vtab.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:600}
+.vnew{display:inline-flex;gap:6px;margin-left:auto}
+.vnew input{border:1px solid var(--line);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px}
+.plan-editor .scn-ai,.plan-editor .scn-manual{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.plan-editor .scn-ai input{flex:1;min-width:240px}
+.plan-editor input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}

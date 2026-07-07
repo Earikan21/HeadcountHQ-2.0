@@ -40,10 +40,9 @@ function navGroups(user, active, features = {}) {
   const groups = [{ label: "Dashboard", items: dash }];
 
   if (user.role !== "manager") {
-    const plan = [I("/budgets", "Budgets", "budgets"), I("/model", "Financial model", "model")];
+    const plan = [I("/model", "Financial model", "model")];
     if (features.planning) plan.push(I("/planning", "Planning", "planning"));
-    if (user.role === "finance_admin") plan.push(I("/philosophy", "Philosophy", "philosophy"));
-    groups.push({ label: "Planning", items: plan });
+    groups.push({ label: "Model", items: plan });
   }
   if (user.role === "finance_admin") groups.push({ label: "Admin", items: [I("/accounts", "Collaborators", "accounts"), I("/audit", "Audit", "audit")] });
   return groups;
