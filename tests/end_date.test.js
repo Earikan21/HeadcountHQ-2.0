@@ -139,10 +139,11 @@ test("End removes a person's headcount from this month on; Restore brings them b
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  // the row offers "End", guarded by a confirmation
+  // the row offers a month picker + "End", guarded by a confirmation
   let page = await (await c.get("/model")).text();
-  assert.match(page, new RegExp(`action="/roster/${emp.id}/end"[^>]*class="inline confirm-delete"`));
+  assert.match(page, new RegExp(`action="/roster/${emp.id}/end"[^>]*class="inline endform confirm-delete"`));
   assert.match(page, /class="linklike danger-link"[^>]*>End</);
+  assert.match(page, /<input type="month" name="end_month" class="endmo"/, "the departure can be scheduled");
 
   const res = await c.post(`/roster/${emp.id}/end`, {});
   assert.equal(res.status, 303);
@@ -179,4 +180,23 @@ test("a manager cannot end someone's headcount", async () => {
   const res = await mgr.post(`/roster/${emp.id}/end`, {});
   assert.equal(res.status, 403);
   assert.equal(srv.db.prepare("SELECT end_date FROM employees WHERE id=?").get(emp.id).end_date, null);
+});
+
+test("a departure can be scheduled for a future month and takes effect only then", async () => {
+  const emp = srv.db.prepare("SELECT id FROM employees WHERE employee_ext_id='E-1'").get();
+  const y = new Date().getFullYear() + 1;
+  await c.post(`/roster/${emp.id}/end`, { end_month: `${y}-09` });
+  assert.equal(srv.db.prepare("SELECT end_date FROM employees WHERE id=?").get(emp.id).end_date, `${y}-09-30`);
+
+  // still on the books today, gone the month after the scheduled end
+  const { buildHeadcountModel } = await import("../src/domain/model.js");
+  const rows = srv.db.prepare("SELECT e.*, d.name AS department_name, c.annual_salary FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN compensation c ON c.employee_id=e.id WHERE e.id=?").all(emp.id);
+  const m = buildHeadcountModel({ employees: rows, loadedMultiplier: 1.2, start: { year: y, month0: 7 }, months: 4, now: new Date() });
+  assert.deepEqual(m.monthlyHeadcount, [1, 1, 0, 0], "Aug + Sep on, Oct off");
+
+  // the sheet shows the scheduled month and swaps End for Restore
+  const page = await (await c.get("/model")).text();
+  assert.match(page, new RegExp(`→ ${y}-09`), "the row shows when they leave");
+  assert.match(page, new RegExp(`action="/roster/${emp.id}/restore"`));
+  await c.post(`/roster/${emp.id}/restore`, {});
 });
