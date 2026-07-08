@@ -36,7 +36,7 @@ test("assistant context exposes per-department average pay (aggregate)", () => {
 
 test("model shows names, a mini dashboard, and cost cells", async () => {
   const page = await (await admin.get("/model")).text();
-  assert.match(page, /HEADCOUNT MODEL/);
+  assert.match(page, /class="hm-line">Headcount model/);
   assert.match(page, /class="sheet model outline"/);
   assert.match(page, /Headcount now/);   // mini dashboard (item 10)
   assert.match(page, /Dana Lee/);             // names (item 3)
@@ -52,7 +52,33 @@ test("period toggle, filters, and zoom controls render", async () => {
   assert.match(page, />Quarterly</);
   assert.match(page, /id="f-search"/);
   assert.match(page, /id="f-dept"/);
-  assert.match(page, /id="f-min"/);
+  assert.ok(!/id="f-min"/.test(page), "min-salary filter removed");
+  assert.ok(!/id="f-max"/.test(page), "max-salary filter removed");
+});
+
+test("the page is a thin title line, not the dark banner, and the sheet is near the top", async () => {
+  const page = await (await admin.get("/model")).text();
+  assert.ok(!/class="hm-band"/.test(page), "dark banner removed");
+  assert.match(page, /class="hm-line"/);
+  // nothing but the KPI strip and one control row stands between the line and the sheet
+  const between = page.slice(page.indexOf('class="hm-line"'), page.indexOf('class="sheet-wrap"'));
+  assert.match(between, /class="kpis model-kpis"/);
+  assert.match(between, /class="model-controls"/);
+  assert.ok(!/class="version-bar"/.test(between), "plan buttons no longer sit above the sheet");
+});
+
+test("columns default to collapsed except the current year, which is anchored on this month", async () => {
+  const page = await (await admin.get("/model")).text();
+  const yr = new Date().getFullYear();
+  // this year expands to months and carries the scroll anchor
+  assert.match(page, new RegExp(`<th class="mc" data-yb="${yr}"[^>]*data-now="1"`));
+  assert.match(page, new RegExp(`<th class="mc ytot" data-year="${yr}" hidden>`), "current year shows months, hides its total");
+  // a neighbouring year collapses to its year-total
+  const other = page.match(/<th class="ygrp" data-year="(\d{4})" data-span="\d+" colspan="1">/);
+  if (other) {
+    assert.notEqual(Number(other[1]), yr, "the collapsed year is not the current one");
+    assert.match(page, new RegExp(`<th class="mc ytot" data-year="${other[1]}">`), "collapsed year shows its total");
+  }
 });
 
 test("quarterly view aggregates columns", async () => {
@@ -82,7 +108,7 @@ test("collapsible department rows and year columns render", async () => {
 
 test("model scopes to a single department (rows + summary)", async () => {
   const page = await (await admin.get("/model?dept=Engineering")).text();
-  assert.match(page, /HEADCOUNT MODEL · Engineering/);
+  assert.match(page, /Headcount model · Engineering/);
   assert.match(page, /Dana Lee/);
   assert.ok(!page.includes("Mara Ito"), "Sales employee excluded when scoped to Engineering");
   assert.match(page, /Total fully-loaded cost/);
