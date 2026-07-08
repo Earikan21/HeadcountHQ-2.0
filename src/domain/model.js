@@ -51,9 +51,18 @@ export function deriveWindow(employees, now = new Date(), horizonMonths = 60) {
   const startAbs = starts.length ? Math.min(...starts, nowAbs) : absOf(now.getFullYear(), 0);
   // Look back to the earliest start, and forward FIVE years (60 months) from now.
   const hz = Math.max(12, Math.min(120, Number(horizonMonths) || 60));
-  const endAbs = Math.max(nowAbs + hz, ...(starts.length ? starts.map((a) => a + 12) : [nowAbs + hz]));
+  let endAbs = Math.max(nowAbs + hz, ...(starts.length ? starts.map((a) => a + 12) : [nowAbs + hz]));
+  // Extend to December of that year so the final calendar year is whole — otherwise a
+  // window ending mid-year (e.g. Jul 2031) sums only part of the year and the annual
+  // total reads as roughly half of the real cost.
+  endAbs = Math.floor(endAbs / 12) * 12 + 11;
   let months = endAbs - startAbs + 1;
-  months = Math.max(12, Math.min(180, months));
+  if (months > 180) {
+    // Cap the span, but keep the last column on a December boundary.
+    const lastAbs = startAbs + 180 - 1;
+    months = 180 - (((lastAbs % 12) + 1) % 12);
+  }
+  months = Math.max(12, months);
   return { start: { year: Math.floor(startAbs / 12), month0: startAbs % 12 }, months };
 }
 
