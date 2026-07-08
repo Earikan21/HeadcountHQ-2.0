@@ -29,7 +29,7 @@ export function registerTwoFactorRoutes(router) {
   router.get("/login/2fa", (ctx) => {
     if (!ctx.user) return ctx.redirect("/login");
     if (!ctx.session || !ctx.session.mfa_pending) return ctx.redirect("/"); // already cleared
-    ctx.html(200, twoFactorForm(ctx, {}));
+    ctx.html(200, twoFactorForm(ctx, { recovery: ctx.query.get("recovery") === "1" }));
   });
 
   router.post("/login/2fa", (ctx) => {
@@ -126,7 +126,6 @@ function twoFactorForm(ctx, { errors, recovery = false }) {
       · <form method="post" action="/logout" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">Sign out</button></form>
     </p>
   </div>`;
-  // honour ?recovery=1 on the GET too
   return renderAuthPage(ctx, { title: "Two-step verification", body });
 }
 
@@ -142,7 +141,7 @@ function setupPage(ctx, { secret, errors }) {
         <li><b>Install an authenticator app</b> if you don't have one — Google Authenticator, 1Password, Authy, or similar.</li>
         <li><b>Scan this QR code</b>, or enter the key by hand.
           <div class="twofa-enroll">
-            <div class="twofa-qr">${raw(qrSvg(uri, { size: 200 }))}</div>
+            <div class="twofa-qr">${raw(qrSvg(uri, { size: 232 }))}</div>
             <div class="twofa-key">
               <div class="muted small">Setup key (manual entry)</div>
               <code class="twofa-secret">${grouped}</code>

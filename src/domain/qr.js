@@ -163,14 +163,33 @@ function placeFinder(m, r, c) {
 
 function placeAlignment(m, version) {
   const centres = ALIGN[version];
+  const last = centres[centres.length - 1];
   for (const r of centres) for (const c of centres) {
-    // Skip the three finder corners.
-    if ((r === 6 && c === 6) || (r === 6 && c === centres[centres.length - 1]) || (c === 6 && r === centres[centres.length - 1])) continue;
-    if (m[r][c] !== null) continue;
+    // Skip only the three that coincide with the finder patterns. Alignment patterns
+    // that cross the timing rows ARE drawn (they override the timing modules).
+    if ((r === 6 && c === 6) || (r === 6 && c === last) || (c === 6 && r === last)) continue;
     for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
       const ring = Math.max(Math.abs(dr), Math.abs(dc));
       m[r + dr][c + dc] = ring === 1 ? 0 : 1;
     }
+  }
+}
+
+// Version information (18 bits: 6-bit version + 12-bit BCH) — required for v7+.
+function versionInfoBits(version) {
+  let rem = version;
+  for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
+  return (version << 12) | rem;
+}
+function placeVersion(m, version) {
+  if (version < 7) return;
+  const n = m.length;
+  const bits = versionInfoBits(version);
+  for (let i = 0; i < 18; i++) {
+    const b = (bits >> i) & 1;
+    const a = n - 11 + (i % 3), d = Math.floor(i / 3);
+    m[d][a] = b; // top-right block
+    m[a][d] = b; // bottom-left block (transpose)
   }
 }
 
@@ -199,6 +218,7 @@ function buildFunctionMatrix(version) {
     if (m[i][6] === null) m[i][6] = i % 2 === 0 ? 1 : 0;
   }
   placeAlignment(m, version);
+  placeVersion(m, version);
   reserveFormat(m);
   return m;
 }
@@ -210,20 +230,20 @@ function placeData(m, codewords, version) {
   for (const cw of codewords) for (let i = 7; i >= 0; i--) bits.push((cw >> i) & 1);
   for (let i = 0; i < REMAINDER[version]; i++) bits.push(0);
 
-  let bit = 0, up = true;
-  for (let col = n - 1; col > 0; col -= 2) {
-    if (col === 6) col--; // skip the vertical timing column
-    for (let i = 0; i < n; i++) {
-      const row = up ? n - 1 - i : i;
-      for (let c = 0; c < 2; c++) {
-        const cc = col - c;
+  let bit = 0;
+  for (let right = n - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5; // skip the vertical timing column
+    const upward = ((right + 1) & 2) === 0;
+    for (let vert = 0; vert < n; vert++) {
+      const row = upward ? n - 1 - vert : vert;
+      for (let j = 0; j < 2; j++) {
+        const cc = right - j;
         if (m[row][cc] === null) {
           m[row][cc] = bit < bits.length ? bits[bit] : 0;
           bit++;
         }
       }
     }
-    up = !up;
   }
 }
 
@@ -308,15 +328,18 @@ export function formatBits(maskIdx) {
 
 function writeFormat(m, maskIdx) {
   const n = m.length;
-  const bits = formatBits(maskIdx); // 15 bits, MSB first is bit 14
+  const bits = formatBits(maskIdx);
   const bit = (i) => (bits >> i) & 1;
-  // Around the top-left finder.
-  for (let i = 0; i <= 5; i++) m[8][i] = bit(i);
-  m[8][7] = bit(6); m[8][8] = bit(7); m[7][8] = bit(8);
-  for (let i = 9; i <= 14; i++) m[14 - i][8] = bit(i);
-  // The duplicated copy near the other two finders.
-  for (let i = 0; i <= 7; i++) m[n - 1 - i][8] = bit(i);
-  for (let i = 8; i <= 14; i++) m[8][n - 15 + i] = bit(i);
+  // Copy 1, wrapping the top-left finder: bits 0-5 down column 8, then the corner,
+  // then bits 9-14 along row 8. (ISO/IEC 18004 §8.9 — the earlier code had row/col
+  // swapped, which no scanner could read.)
+  for (let i = 0; i <= 5; i++) m[i][8] = bit(i);
+  m[7][8] = bit(6); m[8][8] = bit(7); m[8][7] = bit(8);
+  for (let i = 9; i <= 14; i++) m[8][14 - i] = bit(i);
+  // Copy 2: bits 0-7 along the bottom of row 8, bits 8-14 up column 8.
+  for (let i = 0; i <= 7; i++) m[8][n - 1 - i] = bit(i);
+  for (let i = 8; i <= 14; i++) m[n - 15 + i][8] = bit(i);
+  m[n - 8][8] = 1; // dark module (must stay set)
 }
 
 /** Encode `text` into a QR module matrix (2D array of 0/1). */
