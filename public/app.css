@@ -535,3 +535,91 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .twofa-confirm input { width: auto; min-width: 140px; letter-spacing: .3em; font-size: 16px; }
 .recovery-codes { list-style: none; padding: 0; margin: 0 0 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 420px; }
 .recovery-codes code { display: block; padding: 8px 12px; background: var(--surface-2, #f3f4f6); border-radius: 8px; font-size: 15px; letter-spacing: .1em; text-align: center; }
+
+/* ============================================================================
+   Premium polish + dark mode (styling only — no layout changes)
+   ============================================================================ */
+
+/* Gentle light refinements + the one missing semantic var. Kept subtle. */
+:root{
+  --surface-2:#eef1f6;
+  --bg:#f5f6f9;
+  --line:#e6e9ef;
+  --shadow:0 1px 2px rgba(16,24,40,.03), 0 1px 3px rgba(16,24,40,.05);
+  --shadow-md:0 8px 28px rgba(16,24,40,.10);
+}
+
+/* Dark theme. Deep, slightly blue-black — reads as a premium finance surface. */
+[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0e131d; --panel:#161d2b; --surface-2:#1e2637;
+  --ink:#e8ebf2; --ink-2:#c3cad8; --muted:#8a93a7;
+  --line:#28324598; --line-2:#222b3b;
+  --brand:#6f79ff; --brand-2:#8f74ff; --brand-soft:#20264a; --brand-ink:#aeb6ff;
+  --green:#34d399; --green-soft:#12291f; --amber:#fbbf24; --amber-soft:#2f2612;
+  --red:#f87171; --red-soft:#331b1b;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.4);
+  --shadow-md:0 10px 34px rgba(0,0,0,.55);
+}
+[data-theme="dark"] .nav-group-label{color:#7b859a}
+
+/* Surfaces defined with literal light hex need a dark counterpart. Light mode is
+   left byte-for-byte unchanged; these only take effect under [data-theme="dark"]. */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea{background:var(--panel);color:var(--ink)}
+[data-theme="dark"] .btn.ghost{background:var(--panel)}
+[data-theme="dark"] .table tbody tr:hover{background:var(--surface-2)}
+[data-theme="dark"] tr.rowerr{background:#331b1b}
+
+/* Flash / error / pill: their soft backgrounds follow the vars, but text + hairline
+   borders were literal — lift them for contrast on dark. */
+[data-theme="dark"] .flash{border-color:transparent}
+[data-theme="dark"] .flash.warn{color:var(--amber);border-color:transparent}
+[data-theme="dark"] .flash.ok{color:var(--green);border-color:transparent}
+[data-theme="dark"] .errors{color:#fca5a5;border-color:transparent}
+[data-theme="dark"] .pill.ok2{color:var(--green)}
+[data-theme="dark"] .pill.warn2{color:var(--amber)}
+[data-theme="dark"] .pill.off{color:var(--red)}
+
+/* The financial-model sheet — colours only; every position/size is untouched. */
+[data-theme="dark"] .sheet thead th,
+[data-theme="dark"] .sheet thead th.rowhead,
+[data-theme="dark"] .sheet .rowhead{background:#141b28}
+[data-theme="dark"] .sheet tbody tr:nth-child(even) td{background:#131a26}
+[data-theme="dark"] .sheet tfoot td{background:var(--surface-2)}
+[data-theme="dark"] .sheet.outline .grp td{background:#1a2233}
+[data-theme="dark"] .sheet.outline .total-grp td{background:#212a3c}
+[data-theme="dark"] .sheet.model td.mc.on{background:#28407a;color:#dbe6fb}
+[data-theme="dark"] .sheet.model tr.scn td{background:#2a1e10}
+[data-theme="dark"] .sheet.model tr.scn td.rowhead{color:#fdba74}
+[data-theme="dark"] .sheet.model td.cell.ovr{background:#241f3a}
+[data-theme="dark"] .sheet.model td.cell input.cell-input.bad{background:#331b1b}
+[data-theme="dark"] .sheet.model td.cell input.cell-input:hover{background:var(--surface-2)}
+[data-theme="dark"] .sheet.model td.cell input.cell-input:focus{background:var(--panel)}
+[data-theme="dark"] .save-pill.ok{background:#12291f;color:var(--green)}
+[data-theme="dark"] .save-pill.err{background:#331b1b;color:var(--red)}
+[data-theme="dark"] .cmp-chart .tick{fill:var(--muted)}
+[data-theme="dark"] .orgnode{background:#18202f;border-color:#2a3550}
+/* Comparison deltas: brighten so red/green read on dark. */
+[data-theme="dark"] .sheet td.num.up{color:#f87171}
+[data-theme="dark"] .sheet td.num.down{color:#34d399}
+
+/* Zoom control: it used white text (a leftover from the old dark banner) and was
+   nearly invisible on the light controls row. Make it neutral in both themes. */
+.zoomctl{background:var(--surface-2)}
+.zoomctl button{color:var(--ink-2)}
+.zoomctl button:hover{background:var(--line-2)}
+.zoomctl #zoom-lvl{color:var(--muted)}
+
+/* ---- theme toggle (sidebar footer, bottom-left) ---- */
+.theme-toggle{display:flex;align-items:center;gap:9px;width:100%;margin-top:10px;padding:8px 8px;
+  border:none;background:none;color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;
+  cursor:pointer;border-radius:8px;transition:background .12s,color .12s}
+.theme-toggle:hover{background:var(--line-2);color:var(--ink)}
+.tt-track{position:relative;flex:0 0 auto;width:34px;height:19px;border-radius:999px;
+  background:var(--line);border:1px solid var(--line);transition:background .15s}
+.tt-thumb{position:absolute;top:1px;left:1px;width:15px;height:15px;border-radius:50%;
+  background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.theme-toggle.on .tt-track{background:var(--brand);border-color:var(--brand)}
+.theme-toggle.on .tt-thumb{transform:translateX(15px)}

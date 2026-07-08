@@ -105,6 +105,7 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} · Headcount HQ</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/theme.js"></script>
 </head>
 <body>
   <div class="app">
@@ -118,6 +119,10 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
           <form method="post" action="/logout" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">Sign out</button></form>
         </div>
       </div>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Toggle dark mode">
+        <span class="tt-track" aria-hidden="true"><span class="tt-thumb"></span></span>
+        <span class="tt-label">Light mode</span>
+      </button>
     </aside>
     <main class="content">
       <div class="wrap">
@@ -158,6 +163,7 @@ export function renderAuthPage(ctx, { title, body, wide = false }) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} · Headcount HQ</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/theme.js"></script>
 </head>
 <body class="auth">
   <main class="authwrap ${wide ? "wide" : ""}">
