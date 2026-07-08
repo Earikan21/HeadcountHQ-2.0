@@ -169,7 +169,7 @@ function attachUser(ctx) {
 
 // ---- helpers ----
 function setSecurityHeaders(res, config) {
-  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' data: https://api.qrserver.com; form-action 'self'");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");

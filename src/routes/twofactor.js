@@ -6,9 +6,9 @@
  * global gate in app.js keeps a pending session out of everything else until the code
  * (or a recovery code) clears it. Enrollment lives under `/account/2fa/*`.
  *
- * The QR image is a self-rendered inline SVG (see domain/qr.js) because the strict
- * CSP forbids external image hosts; the base32 secret is shown too, so an app that
- * can't scan still works via manual entry.
+ * The QR is rendered by an external image service (api.qrserver.com) — a hand-rolled
+ * encoder proved unreliable. The base32 setup key is shown alongside, so manual entry
+ * always works and is the private option (the key never leaves the browser that way).
  */
 import { html, raw } from "../html.js";
 import { renderAuthPage, renderPage, csrfField, errorList } from "../views/ui.js";
@@ -16,7 +16,6 @@ import { requireAuth } from "../middleware.js";
 import { getUserById, setTotpSecret, enableTotp, resetTotp, consumeRecoveryCode, regenerateRecoveryCodes, recoveryCodesRemaining } from "../repos/users.js";
 import { markSessionMfaPassed } from "../auth/sessions.js";
 import { generateSecret, verifyTotp, otpauthURL, generateRecoveryCodes } from "../domain/totp.js";
-import { qrSvg } from "../domain/qr.js";
 import { logAudit } from "../repos/audit.js";
 import { tooManyAttempts, clearAttempts } from "../auth/ratelimit.js";
 import { clientIp } from "../middleware.js";
@@ -129,19 +128,23 @@ function twoFactorForm(ctx, { errors, recovery = false }) {
   return renderAuthPage(ctx, { title: "Two-step verification", body });
 }
 
+function qrImageUrl(uri, size = 232) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(uri)}`;
+}
+
 function setupPage(ctx, { secret, errors }) {
   const uri = otpauthURL({ secret, label: ctx.user.email });
   const grouped = secret.replace(/(.{4})/g, "$1 ").trim();
   const body = html`
-    <div class="pagehead"><h1>Set up two-factor authentication</h1>
-      <p class="muted">Your workspace requires a second step at sign-in. It takes about a minute.</p></div>
-    ${errorList(errors)}
-    <section class="card twofa-setup">
+    <div class="card auth twofa-setup">
+      <h1>Set up two-factor authentication</h1>
+      <p class="muted small">Your workspace requires a second step at sign-in. It takes about a minute — you can't reach the rest of the app until it's done.</p>
+      ${errorList(errors)}
       <ol class="twofa-steps">
-        <li><b>Install an authenticator app</b> if you don't have one — Google Authenticator, 1Password, Authy, or similar.</li>
-        <li><b>Scan this QR code</b>, or enter the key by hand.
+        <li><b>Install an authenticator app</b> — Google Authenticator, 1Password, Authy, or similar.</li>
+        <li><b>Scan the QR code</b>, or tap "enter a setup key" in your app and type the key.
           <div class="twofa-enroll">
-            <div class="twofa-qr">${raw(qrSvg(uri, { size: 232 }))}</div>
+            <img class="twofa-qr" src="${raw(qrImageUrl(uri))}" width="232" height="232" alt="Two-factor QR code">
             <div class="twofa-key">
               <div class="muted small">Setup key (manual entry)</div>
               <code class="twofa-secret">${grouped}</code>
@@ -157,21 +160,26 @@ function setupPage(ctx, { secret, errors }) {
           </form>
         </li>
       </ol>
-    </section>`;
-  return renderPage(ctx, { title: "Set up two-factor", body, active: "account" });
+      <p class="muted small"><form method="post" action="/logout" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">Sign out</button></form></p>
+    </div>`;
+  // Chrome-less: no nav or menu is shown until 2FA setup is complete.
+  return renderAuthPage(ctx, { title: "Set up two-factor", body, wide: true });
 }
 
 function recoveryPage(ctx, { codes, firstTime }) {
   const body = html`
-    <div class="pagehead"><h1>${firstTime ? "Two-factor is on 🎉" : "New recovery codes"}</h1>
-      <p class="muted">Save these backup codes somewhere safe. Each works <b>once</b> if you lose your phone. This is the only time they're shown.</p></div>
-    <section class="card">
+    <div class="card auth">
+      <h1>${firstTime ? "Two-factor is on" : "New recovery codes"}</h1>
+      <p class="muted small">Save these backup codes somewhere safe. Each works <b>once</b> if you lose your phone. This is the only time they're shown.</p>
       <ul class="recovery-codes">${codes.map((c) => html`<li><code>${c}</code></li>`)}</ul>
       <p class="muted small">Regenerating codes later invalidates this set.</p>
       <a class="btn" href="/">Continue to Headcount HQ</a>
-      <a class="btn ghost" href="/account">Account settings</a>
-    </section>`;
-  return renderPage(ctx, { title: "Recovery codes", body, active: "account" });
+      ${firstTime ? "" : html`<a class="btn ghost" href="/account">Account settings</a>`}
+    </div>`;
+  // First-time enrollment stays chrome-less; a later regeneration is a normal in-app page.
+  return firstTime
+    ? renderAuthPage(ctx, { title: "Recovery codes", body })
+    : renderPage(ctx, { title: "Recovery codes", body, active: "account" });
 }
 
 function manageRecoveryPage(ctx, { errors }) {

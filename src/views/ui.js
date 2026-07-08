@@ -150,7 +150,7 @@ function assistantWidget(ctx) {
 }
 
 /** A standalone (no-nav) page for login / setup / invite screens. */
-export function renderAuthPage(ctx, { title, body }) {
+export function renderAuthPage(ctx, { title, body, wide = false }) {
   return html`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -160,7 +160,7 @@ export function renderAuthPage(ctx, { title, body }) {
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body class="auth">
-  <main class="authwrap">
+  <main class="authwrap ${wide ? "wide" : ""}">
     <div class="brand center"><span class="logo">H</span> Headcount HQ</div>
     ${raw(body)}
   </main>

@@ -173,6 +173,7 @@ input[type=radio],input[type=checkbox]{width:auto;margin:0 8px 0 0}
 /* ---------- auth screens ---------- */
 body.auth{background:var(--bg)}
 .authwrap{max-width:400px;margin:9vh auto;padding:0 20px}
+.authwrap.wide{max-width:600px}
 .brand.center{justify-content:center;font-size:18px;margin-bottom:18px}
 .card.auth h1{font-size:19px;margin:0 0 14px}
 
@@ -526,7 +527,7 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .twofa-steps > li { margin: 0 0 18px; }
 .twofa-enroll { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin: 10px 0 2px; }
 .twofa-qr { flex: 0 0 auto; border: 1px solid var(--line, #e5e7eb); border-radius: 10px; padding: 8px; background: #fff; line-height: 0; }
-.twofa-qr svg { display: block; }
+.twofa-qr { width: 232px; height: 232px; }
 .twofa-key { min-width: 200px; }
 .twofa-secret { display: inline-block; margin: 4px 0; padding: 8px 12px; font-size: 16px; letter-spacing: .12em;
   background: var(--surface-2, #f3f4f6); border-radius: 8px; user-select: all; }
