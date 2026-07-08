@@ -49,20 +49,19 @@ function decode(text) {
   const m = qrMatrix(text);
   const n = m.length, version = (n - 17) / 4;
   const bits = [];
-  for (let i = 0; i <= 5; i++) bits[i] = m[8][i];
-  bits[6] = m[8][7]; bits[7] = m[8][8]; bits[8] = m[7][8];
-  for (let i = 9; i <= 14; i++) bits[i] = m[14 - i][8];
+  for (let i = 0; i <= 5; i++) bits[i] = m[i][8];
+  bits[6] = m[7][8]; bits[7] = m[8][8]; bits[8] = m[8][7];
+  for (let i = 9; i <= 14; i++) bits[i] = m[8][14 - i];
   let v = 0; for (let i = 14; i >= 0; i--) v = (v << 1) | bits[i];
   const maskIdx = ((v ^ 0b101010000010010) >> 10) & 0b111;
 
   const isData = dataMask(version), maskFn = MASKS[maskIdx];
   const um = m.map((row, r) => row.map((val, c) => (isData[r][c] && maskFn(r, c) ? val ^ 1 : val)));
   const stream = [];
-  let up = true;
-  for (let col = n - 1; col > 0; col -= 2) {
-    if (col === 6) col--;
-    for (let i = 0; i < n; i++) { const row = up ? n - 1 - i : i; for (let c = 0; c < 2; c++) { const cc = col - c; if (isData[row][cc]) stream.push(um[row][cc]); } }
-    up = !up;
+  for (let right = n - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    const upward = ((right + 1) & 2) === 0;
+    for (let vert = 0; vert < n; vert++) { const row = upward ? n - 1 - vert : vert; for (let j = 0; j < 2; j++) { const cc = right - j; if (isData[row][cc]) stream.push(um[row][cc]); } }
   }
   const cw = []; for (let i = 0; i + 8 <= stream.length; i += 8) { let b = 0; for (let j = 0; j < 8; j++) b = (b << 1) | stream[i + j]; cw.push(b); }
   const info = VERSION_M[version];
