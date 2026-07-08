@@ -373,10 +373,17 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .hm-line .muted { font-weight: 400; }
 
 /* One row of controls: view period, search, department scope, zoom, actions. */
-.model-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
-.model-controls .spacer { flex: 1 1 auto; }
-.model-controls #f-search { min-width: 200px; }
-.model-controls select, .model-controls input { height: 30px; }
+.model-controls { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; margin: 0 0 10px; }
+/* Beat the global `input,select,textarea{width:100%}` — otherwise each control claims
+   a full line of its own and the row becomes a column. */
+.model-controls > * { flex: 0 0 auto; }
+.model-controls input, .model-controls select { width: auto; height: 32px; padding: 4px 9px; font-size: 13px; }
+.model-controls #f-search { flex: 0 1 260px; min-width: 120px; }
+.model-controls #f-dept { flex: 0 1 190px; min-width: 110px; }
+.model-controls .spacer { flex: 1 1 auto; min-width: 0; }
+.model-controls .ptabs { display: flex; white-space: nowrap; }
+.model-controls .zoomctl { display: inline-flex; align-items: center; white-space: nowrap; }
+.model-controls .btn { white-space: nowrap; }
 
 /* Thin plan bar: which plan, how long it runs, and the way out. */
 .plan-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -412,3 +419,8 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .linklike.danger-link { color: #dc2626; }
 .sheet.model td.act { white-space: nowrap; }
 .sheet.model td.act form + form::before { content: "·"; color: var(--muted, #9ca3af); margin: 0 4px; }
+
+/* Scheduling a departure from the sheet: a month picker beside the End action. */
+.sheet.model td.act .endform { display: inline-flex; align-items: center; gap: 4px; }
+.sheet.model td.act .endmo { width: 118px; height: 24px; padding: 1px 4px; font-size: 11px; }
+.sheet.model th.acth { font-weight: 600; }

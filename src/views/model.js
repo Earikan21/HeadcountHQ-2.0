@@ -207,7 +207,7 @@ export function financialModelPage(ctx, model, extra = {}) {
         <form method="post" action="/roster/duplicate/${r.id}" class="inline">${csrfField(ctx)}<button class="linklike" type="submit" title="Duplicate this role">Duplicate</button></form>
         ${r.endDate
           ? html`<form method="post" action="/roster/${r.id}/restore" class="inline">${csrfField(ctx)}<button class="linklike" type="submit" title="Clear the end date">Restore</button></form>`
-          : html`<form method="post" action="/roster/${r.id}/end" class="inline confirm-delete" data-confirm="Remove ${r.name || "this person"} from the model at the end of this month? You can restore them afterwards.">${csrfField(ctx)}<button class="linklike danger-link" type="submit" title="Remove this headcount from the model">End</button></form>`}
+          : html`<form method="post" action="/roster/${r.id}/end" class="inline endform confirm-delete" data-confirm="Remove ${r.name || "this person"} from the model {when}? You can restore them afterwards.">${csrfField(ctx)}<input type="month" name="end_month" class="endmo" aria-label="End month for ${r.name || "this person"}" title="Last month on the books — blank means the end of this month"><button class="linklike danger-link" type="submit" title="Schedule this headcount to end">End</button></form>`}
       </td>` : html`<td class="act"></td>`}
       ${yearCells(per, groups, collapsed)}
     </tr>`;
@@ -240,7 +240,7 @@ export function financialModelPage(ctx, model, extra = {}) {
         ${sortableHead("start", "Starts", "text")}
         ${sortableHead("salary", "Annual Base", "num")}
         ${sortableHead("loaded", "Loaded Mo", "num")}
-        <th rowspan="2"></th>
+        <th rowspan="2" class="acth">Actions</th>
         ${yearGroupHead}
       </tr>
       <tr>${bucketHead}</tr>

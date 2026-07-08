@@ -86,6 +86,9 @@
   Array.prototype.forEach.call(document.querySelectorAll("form.confirm-delete"), function (f) {
     f.addEventListener("submit", function (ev) {
       var msg = f.getAttribute("data-confirm") || "Are you sure? This cannot be undone.";
+      // "{when}" resolves to whatever end month the row's picker is showing.
+      var mo = f.querySelector('input[name="end_month"]');
+      if (mo) msg = msg.replace("{when}", mo.value ? "at the end of " + mo.value : "at the end of this month");
       if (!window.confirm(msg)) ev.preventDefault();
     });
   });
