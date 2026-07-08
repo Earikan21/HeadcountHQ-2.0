@@ -9,7 +9,6 @@ import {
 import { expectedRange } from "../domain/budget.js";
 import { listDepartments } from "../repos/departments.js";
 import { getSettings } from "../repos/settings.js";
-import { toCsv } from "../domain/csv.js";
 import { financialModelPage } from "../views/model.js";
 import { buildHeadcountModel } from "../domain/model.js";
 import { listEmployees } from "../repos/roster.js";
@@ -80,6 +79,7 @@ export function registerBudgetRoutes(router) {
       hires.push({
         department: String(b.scn_department).trim(), role: String(b.scn_role || "Hire").trim(),
         start_month: /^\d{4}-\d{2}$/.test(String(b.scn_start || "")) ? b.scn_start : null,
+        end_month: /^\d{4}-\d{2}$/.test(String(b.scn_end || "")) ? b.scn_end : null,
         annual_salary: Number(b.scn_salary) || 0, count: Math.max(1, Number(b.scn_count) || 1),
       });
       setPlanHires(ctx.db, plan.id, hires);
@@ -114,7 +114,23 @@ export function registerBudgetRoutes(router) {
     const isDefault = fields.salaryGrowthPct === 0 && fields.loadedMultiplier == null && fields.bonusPct === 0 && fields.hiringSlipMonths === 0 && fields.costPerHire === 0;
     if (dept) { a.byDept = a.byDept || {}; if (isDefault) delete a.byDept[dept]; else a.byDept[dept] = fields; }
     else { Object.assign(a, fields); }
+    // Model length (1-10 years) is plan-wide, never per-department.
+    if (ctx.body.horizon_years != null && String(ctx.body.horizon_years) !== "")
+      a.horizonYears = clampHorizon(ctx.body.horizon_years);
     setPlanAssumptions(ctx.db, plan.id, a);
+    ctx.redirect(`/model?version=${plan.id}${dept ? "&dept=" + encodeURIComponent(dept) : ""}`);
+  });
+
+  // Model length (1-10 years). Its own endpoint so submitting it never rewrites the
+  // assumption fields (an empty assumptions form would otherwise zero them out).
+  router.post("/model/versions/:id/horizon", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const a = planAssumptions(plan);
+    a.horizonYears = clampHorizon(ctx.body.horizon_years);
+    setPlanAssumptions(ctx.db, plan.id, a);
+    const dept = String(ctx.body.dept || "").trim();
     ctx.redirect(`/model?version=${plan.id}${dept ? "&dept=" + encodeURIComponent(dept) : ""}`);
   });
 
@@ -170,33 +186,60 @@ export function registerBudgetRoutes(router) {
     ctx.redirect(`/budgets?mode=money&msg=Money+budgets+set+from+the+headcount+budget`);
   });
 
-  // Export the financial model as CSV — opens in Excel or Google Sheets (Directive 4.0 M25).
+  // Export the financial model as CSV using live spreadsheet FORMULAS (item 5):
+  // loaded monthly derives from annual base, month cells reference it, and every
+  // total is a =SUM(), so editing a salary in Excel/Sheets recomputes the model.
   router.get("/budgets/export.csv", (ctx) => {
     if (!requirePermission(ctx, canViewBudgets)) return;
-    const { rows, company, currentEmployees } = allReconciliation(ctx.db);
-    const cap = getCompanyBudget(ctx.db);
-    const COLS = ["department", "current_employees", "approved_positions", "headcount_budget", "open_budgeted", "committed_cost", "money_budget"];
-    const data = rows.map((r) => ({
-      department: r.name,
-      current_employees: r.currentEmployees,
-      approved_positions: r.positions.approved,
-      headcount_budget: r.effHeadcount,
-      open_budgeted: Math.max(0, r.effHeadcount - r.currentEmployees),
-      committed_cost: Math.round(r.money.committed || 0),
-      money_budget: Math.round(r.effMoney || 0),
-    }));
-    data.push({
-      department: "TOTAL (company)",
-      current_employees: currentEmployees,
-      approved_positions: company.positions.approved,
-      headcount_budget: cap.headcount,
-      open_budgeted: Math.max(0, (cap.headcount || 0) - currentEmployees),
-      committed_cost: Math.round(company.money.committed || 0),
-      money_budget: Math.round(cap.money || 0),
-    });
-    logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.exported", entity: "budget_envelope", detail: { rows: data.length } });
-    ctx.attachment("financial-model.csv", "text/csv; charset=utf-8", toCsv(COLS, data));
+    const versionId = currentVersionId(ctx);
+    const current = versionId ? getPlan(ctx.db, versionId) : null;
+    const hires = planHires(current);
+    const allEmployees = listEmployees(ctx.db, {});
+    const dept = ctx.query.get("dept") || null;
+    const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
+    const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
+    const assumptions = current ? planAssumptions(current) : {};
+    const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
+    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions });
+    logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.exported", entity: "plan_version", detail: { rows: model.roster.length, version: versionId, dept } });
+    ctx.attachment("financial-model.csv", "text/csv; charset=utf-8", modelToFormulaCsv(model));
   });
+}
+
+/** Model length in years: clamp into 1..10; only a missing/blank value defaults to 5. */
+function clampHorizon(v) {
+  if (v == null || String(v).trim() === "") return 5;
+  const n = Number(v);
+  return Math.max(1, Math.min(10, Math.round(Number.isFinite(n) ? n : 5)));
+}
+
+/** A1 column letter for a 0-based column index (0 -> A, 26 -> AA). */
+export function colLetter(n) { let s = ""; n += 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+/** CSV-escape. Formulas below contain no comma/quote, so they pass through unquoted
+ *  and Excel/Sheets parse them as formulas rather than text. */
+function csvCell(v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+/**
+ * The model as a *live* spreadsheet: annual base is the only hardcoded number per
+ * person. Loaded monthly is `=D<row>/12*<load>`, each active month references it,
+ * and every total is a `=SUM(...)` over the person rows.
+ */
+export function modelToFormulaCsv(model) {
+  const { cols, roster } = model;
+  const header = ["Department", "Name", "Role", "Annual Base", "Loaded Monthly"].concat(cols.map((c) => c.fullLabel));
+  const lines = [header.map(csvCell).join(",")];
+  const first = 2; // row 1 is the header
+  roster.forEach((r, i) => {
+    const row = first + i;
+    const m = r.annualBase ? Math.round((r.loadedMonthly * 12 / r.annualBase) * 10000) / 10000 : (model.mult || 1.2);
+    const loaded = "=D" + row + "/12*" + m;
+    const months = cols.map((c, j) => (r.active[j] ? "=$E" + row : "0"));
+    lines.push([csvCell(r.department), csvCell(r.name || ""), csvCell(r.role || ""), Math.round(r.annualBase), loaded].concat(months).join(","));
+  });
+  const last = first + roster.length - 1;
+  const sum = (L) => (roster.length ? "=SUM(" + L + first + ":" + L + last + ")" : "0");
+  const totals = ["TOTAL", "", "", sum("D"), sum("E")].concat(cols.map((c, j) => sum(colLetter(5 + j))));
+  lines.push(totals.map(csvCell).join(","));
+  return lines.join("\r\n") + "\r\n";
 }
 
 const bar = (used, budget, over) => {

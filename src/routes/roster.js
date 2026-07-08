@@ -131,6 +131,32 @@ export function registerRosterRoutes(router) {
     ctx.redirect("/model?msg=Position+duplicated");
   });
 
+  // ---- Remove headcount: give a person an end date (admin only) ----
+  // Non-destructive: the person stays on the sheet and in history, but stops
+  // contributing cost from `end_month` onward. Reversible via /roster/:id/restore.
+  router.post("/roster/:id/end", (ctx) => {
+    if (!requirePermission(ctx, canImportRoster)) return;
+    const id = Number(ctx.params.id);
+    const src = ctx.db.prepare("SELECT id, name FROM employees WHERE id = ?").get(id);
+    if (!src) return ctx.redirect("/model");
+    const m = String(ctx.body.end_month || "");
+    const now = new Date();
+    // last day of the chosen month (default: this month)
+    const [yy, mm] = /^\d{4}-\d{2}$/.test(m) ? m.split("-").map(Number) : [now.getFullYear(), now.getMonth() + 1];
+    const endDate = new Date(Date.UTC(yy, mm, 0)).toISOString().slice(0, 10);
+    ctx.db.prepare("UPDATE employees SET end_date = ?, updated_at = datetime('now') WHERE id = ?").run(endDate, id);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "person.ended", entity: "employee", entityId: id, detail: { end_date: endDate } });
+    ctx.redirect(ctx.body.back || "/model?msg=Headcount+removed+from+" + endDate.slice(0, 7));
+  });
+
+  router.post("/roster/:id/restore", (ctx) => {
+    if (!requirePermission(ctx, canImportRoster)) return;
+    const id = Number(ctx.params.id);
+    ctx.db.prepare("UPDATE employees SET end_date = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "person.restored", entity: "employee", entityId: id });
+    ctx.redirect(ctx.body.back || "/model?msg=Headcount+restored");
+  });
+
   // ---- Step 1: upload ----
   router.get("/roster/import", (ctx) => {
     if (!requirePermission(ctx, canImportRoster)) return;

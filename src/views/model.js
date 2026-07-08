@@ -1,10 +1,19 @@
 /**
- * Live, in-app spreadsheet financial model (Directive 4.0): mini dashboard,
- * month/quarter/year period toggle, plan versions, a sortable + filterable roster
- * with fully-loaded cost per period, and Excel-style collapsible rows (by
- * department) and columns (by year). Rendered from `buildHeadcountModel`.
+ * Live, in-app spreadsheet financial model (Directive 4.0): a thin title line, a
+ * mini dashboard, one row of view/filter controls, then the sheet itself.
+ *
+ * Plan versions live in the left nav (see views/ui.js) — this page only carries the
+ * *editor* for whichever plan is selected: a thin bar (name + Delete) and two
+ * collapsed sections (Hires, Assumptions & drivers).
+ *
+ * Columns are year-grouped and collapse to a single year-total. Everything except
+ * the current calendar year starts collapsed, and the sheet scrolls to the current
+ * month on load, so a 10-year model opens on "today" rather than on ancient history.
  */
 import { html, raw } from "../html.js";
+
+/** Join class names, dropping the empty ones (so we never emit `class="prow scn "`). */
+const cx = (...names) => names.filter(Boolean).join(" ");
 import { renderPage, csrfField, money, moneyShort } from "./ui.js";
 import { canImportRoster } from "../authz.js";
 import { periodBuckets, periodize } from "../domain/model.js";
@@ -25,28 +34,47 @@ function yearGroupsOf(cols, buckets) {
   return groups;
 }
 
-/** Cost cells for one row across all year-groups: bucket cells + a hidden year-total. */
-function yearCells(perBucket, groups) {
+/**
+ * Cost cells for one row across all year-groups. A group with more than one bucket
+ * also gets a year-total cell; exactly one of (buckets, total) is visible, and which
+ * one is decided by `collapsed` so the server renders the same state the toggle does.
+ */
+function yearCells(perBucket, groups, collapsed) {
   return groups.map((g) => {
-    const cells = g.pos.map((i) => raw(`<td class="mc" data-yb="${g.year}" data-v="${Math.round(perBucket[i])}">${perBucket[i] ? moneyShort(perBucket[i]) : ""}</td>`));
-    if (g.pos.length <= 1) return html`${cells}`; // single bucket (e.g. yearly view): nothing to collapse
+    const off = collapsed.has(g.year);
+    const cells = g.pos.map((i) => raw(`<td class="mc" data-yb="${g.year}" data-v="${Math.round(perBucket[i])}"${off ? " hidden" : ""}>${perBucket[i] ? moneyShort(perBucket[i]) : ""}</td>`));
+    if (g.pos.length <= 1) return html`${cells}`; // single bucket (yearly view): nothing to collapse
     const tot = g.pos.reduce((a, i) => a + perBucket[i], 0);
-    return html`${cells}${raw(`<td class="mc ytot" data-year="${g.year}" data-v="${Math.round(tot)}" hidden>${tot ? moneyShort(tot) : ""}</td>`)}`;
+    return html`${cells}${raw(`<td class="mc ytot" data-year="${g.year}" data-v="${Math.round(tot)}"${off ? "" : " hidden"}>${tot ? moneyShort(tot) : ""}</td>`)}`;
   });
 }
 
-function versionBar(ctx, extra) {
-  const plans = extra.plans || [];
+/** Thin plan bar: which plan you're editing, its model length, and a red Delete. */
+function planBar(ctx, extra) {
   const cur = extra.current;
-  const tab = (href, label, on) => html`<a class="vtab ${on ? "on" : ""}" href="${href}">${label}</a>`;
-  return html`<div class="version-bar">
-    <span class="vlabel">Plans</span>
-    ${tab("/model", "Actual", !cur)}
-    ${plans.map((pl) => tab(`/model?version=${pl.id}`, pl.name, cur && cur.id === pl.id))}
-    ${extra.canEdit ? html`<form method="post" action="/model/versions" class="vnew">${csrfField(ctx)}<input name="name" placeholder="New plan name" aria-label="New plan name"><button class="btn sm" type="submit">+ Save as plan</button></form>` : ""}
+  if (!cur || !extra.canEdit) return "";
+  const horizon = Math.max(1, Math.min(10, Number((extra.assumptions || {}).horizonYears) || 5));
+  const yrs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  return html`<div class="plan-bar">
+    <span class="pb-name">Plan: <b>${cur.name}</b></span>
+    <form method="post" action="/model/versions/${cur.id}/horizon" class="pb-horizon">
+      ${csrfField(ctx)}
+      ${extra.dept ? html`<input type="hidden" name="dept" value="${extra.dept}">` : ""}
+      <label>Model length
+        <select name="horizon_years" aria-label="Model length in years">
+          ${yrs.map((y) => html`<option value="${y}" ${y === horizon ? raw("selected") : ""}>${y} yr${y > 1 ? "s" : ""}</option>`)}
+        </select>
+      </label>
+      <button class="btn sm ghost" type="submit">Apply</button>
+    </form>
+    <form method="post" action="/model/versions/${cur.id}/delete" class="inline confirm-delete"
+          data-confirm="Delete the plan “${cur.name}”? This can't be undone.">
+      ${csrfField(ctx)}<button class="btn sm danger" type="submit">Delete plan</button>
+    </form>
   </div>`;
 }
 
+/** The plan editor: both sections collapsed by default so the sheet stays visible. */
 function planEditor(ctx, extra) {
   const cur = extra.current;
   if (!cur || !extra.canEdit) return "";
@@ -56,14 +84,13 @@ function planEditor(ctx, extra) {
   const cv = scope ? ((A.byDept && A.byDept[scope]) || {}) : A;
   const ph = (k, dflt) => (scope && A[k] != null && A[k] !== "" ? String(A[k]) : dflt);
   const val = (v) => (v != null && v !== "" ? String(v) : "");
+  const window_ = (h) => (h.start_month || "start") + (h.end_month ? " → " + h.end_month : "");
   const chips = hires.length
-    ? html`<div class="hire-chips">${hires.map((h, i) => html`<span class="chip">${h.count}× ${h.role} · ${h.department} · ${h.start_month || "start"} · ${money(h.annual_salary)}<form method="post" action="/model/versions/${cur.id}/hire/${i}/delete" class="inline">${csrfField(ctx)}<button class="chip-x" type="submit" aria-label="remove">×</button></form></span>`)}</div>`
+    ? html`<div class="hire-chips">${hires.map((h, i) => html`<span class="${cx("chip", h.end_month && "temp")}">${h.count}× ${h.role} · ${h.department} · ${window_(h)} · ${money(h.annual_salary)}<form method="post" action="/model/versions/${cur.id}/hire/${i}/delete" class="inline">${csrfField(ctx)}<button class="chip-x" type="submit" aria-label="remove">×</button></form></span>`)}</div>`
     : html`<p class="muted small">No planned hires yet.</p>`;
-  return html`<section class="card plan-editor">
-    <div class="row-between"><h2>Plan: ${cur.name} <span class="hint">layered on the live roster</span></h2>
-      <form method="post" action="/model/versions/${cur.id}/delete" class="inline">${csrfField(ctx)}<button class="linklike" type="submit">Delete plan</button></form></div>
+  return html`<section class="plan-editor">
     ${extra.aiError ? html`<div class="flash warn">${extra.aiError}</div>` : ""}
-    <details class="plan-sect" open>
+    <details class="plan-sect">
       <summary>Hires${hires.length ? " · " + hires.length : ""}</summary>
       <div class="plan-sect-body">
         ${extra.aiReady ? html`<form method="post" action="/model/versions/${cur.id}/ai" class="scn-ai">${csrfField(ctx)}<input name="description" placeholder="e.g. 2 AEs in Sales, Jun 2027, $120k" aria-label="Describe hires"><button class="btn sm" type="submit">AI</button></form>` : ""}
@@ -71,11 +98,13 @@ function planEditor(ctx, extra) {
           ${csrfField(ctx)}
           <input name="scn_department" placeholder="Dept" aria-label="Department">
           <input name="scn_role" placeholder="Role" aria-label="Role">
-          <input name="scn_start" type="month" aria-label="Start month">
+          <label class="mo">Start <input name="scn_start" type="month" aria-label="Start month"></label>
+          <label class="mo">End <input name="scn_end" type="month" aria-label="End month (optional)"></label>
           <input name="scn_salary" type="number" min="0" step="1000" placeholder="Annual $" aria-label="Annual salary">
-          <input name="scn_count" type="number" min="1" step="1" value="1" aria-label="Count" style="width:56px">
+          <input name="scn_count" type="number" min="1" step="1" value="1" aria-label="Count" class="tiny">
           <button class="btn sm ghost" type="submit">Add</button>
         </form>
+        <p class="muted small">Leave <b>End</b> blank for a permanent hire. Set it to add headcount for a limited time (a contractor, a backfill, a seasonal team). To remove existing headcount, use <b>End</b> on their row — or import an "End date" column for exact dates.</p>
         ${chips}
       </div>
     </details>
@@ -93,7 +122,7 @@ function planEditor(ctx, extra) {
           <label class="asm">Cost per hire <span class="muted">one-time $</span><input name="cost_per_hire" type="number" min="0" step="500" value="${val(cv.costPerHire)}" placeholder="${ph("costPerHire", "0")}"></label>
           <button class="btn sm ghost" type="submit">Save</button>
         </form>
-        <p class="muted small" style="margin-top:6px">Salary growth compounds each year from now forward.</p>
+        <p class="muted small">Salary growth compounds each year from now forward. Model length is set in the plan bar above.</p>
       </div>
     </details>
   </section>`;
@@ -120,6 +149,11 @@ export function financialModelPage(ctx, model, extra = {}) {
   const netNew = hc12 - curHc;
   const avgHead = curHc ? Math.round((totalMonthlyCost[nowIdx] || 0) / curHc) : 0;
 
+  // Every year but the current one starts collapsed to its year-total column.
+  const collapsed = new Set(groups.filter((g) => g.pos.length > 1 && g.year !== thisYear).map((g) => g.year));
+  // The bucket the user should land on: the one holding "now".
+  const nowBucket = buckets.findIndex((b) => b.idxs.includes(nowIdx));
+
   const dash = html`<div class="kpis model-kpis">
     ${kpi("Headcount now", n0(curHc), "as of " + nowLabel)}
     ${kpi(`${thisYear} spend`, money(thisYearCost), "fully loaded, this year")}
@@ -130,41 +164,59 @@ export function financialModelPage(ctx, model, extra = {}) {
   </div>`;
 
   const allDepts = extra.allDepartments || departments;
-  const q = (base) => base + (extra.current ? "&version=" + extra.current.id : "") + (extra.dept ? "&dept=" + encodeURIComponent(extra.dept) : "");
+  const params = [];
+  if (extra.current) params.push("version=" + extra.current.id);
+  if (extra.dept) params.push("dept=" + encodeURIComponent(extra.dept));
+  const q = (base) => base + (params.length ? (base.includes("?") ? "&" : "?") + params.join("&") : "");
   const periodTab = (p, label) => raw(`<a class="ptab ${p === period ? "on" : ""}" href="${q("/model?period=" + p)}">${label}</a>`);
+
+  // One line: view period, search, department scope, zoom, and the two actions.
   const controls = html`<div class="model-controls">
     <div class="ptabs">${periodTab("month", "Monthly")}${periodTab("quarter", "Quarterly")}${periodTab("year", "Yearly")}</div>
+    <input id="f-search" type="search" placeholder="Search name / role" aria-label="Search">
     <select id="f-dept" aria-label="Scope to department"><option value="">All departments</option>${allDepts.map((d) => html`<option value="${d}" ${extra.dept === d ? raw("selected") : ""}>${d}</option>`)}</select>
-    <input id="f-min" type="number" placeholder="Min $" aria-label="Min salary" style="width:96px">
-    <input id="f-max" type="number" placeholder="Max $" aria-label="Max salary" style="width:96px">
     <span class="zoomctl"><button id="zoom-out" type="button" aria-label="Zoom out">&minus;</button><span id="zoom-lvl">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button></span>
+    <span class="spacer"></span>
     ${isAdmin ? html`<a class="btn sm" href="/roster/new">+ Add person</a>` : ""}
-    <a class="btn ghost sm" href="/budgets/export.csv">Export CSV</a>
+    <a class="btn ghost sm" href="${q("/budgets/export.csv")}">Export CSV</a>
   </div>`;
 
   const sortableHead = (key, label, type, cls = "") => raw(`<th class="sortable ${cls}" rowspan="2" data-sort="${key}" data-type="${type}">${label}</th>`);
-  const yearGroupHead = groups.map((g) => { const multi = g.pos.length > 1; const toggle = multi ? `<button type="button" class="ytoggle" data-year="${g.year}" aria-label="Collapse ${g.year}">–</button> ` : ""; return raw(`<th class="ygrp" data-year="${g.year}" data-span="${g.pos.length}" colspan="${g.pos.length}">${toggle}${g.year}</th>`); });
-  const bucketHead = groups.map((g) => html`${g.pos.map((i) => raw(`<th class="mc" data-yb="${g.year}">${buckets[i].label}</th>`))}${g.pos.length > 1 ? raw(`<th class="mc ytot" data-year="${g.year}" hidden>${g.year} total</th>`) : ""}`);
+  const yearGroupHead = groups.map((g) => {
+    const multi = g.pos.length > 1;
+    const off = collapsed.has(g.year);
+    const toggle = multi ? `<button type="button" class="ytoggle" data-year="${g.year}" aria-label="${off ? "Expand" : "Collapse"} ${g.year}">${off ? "+" : "–"}</button> ` : "";
+    return raw(`<th class="ygrp" data-year="${g.year}" data-span="${g.pos.length}" colspan="${off ? 1 : g.pos.length}">${toggle}${g.year}</th>`);
+  });
+  const bucketHead = groups.map((g) => {
+    const off = collapsed.has(g.year);
+    return html`${g.pos.map((i) => raw(`<th class="mc" data-yb="${g.year}"${i === nowBucket ? ' data-now="1"' : ""}${off ? " hidden" : ""}>${buckets[i].label}</th>`))}${g.pos.length > 1 ? raw(`<th class="mc ytot" data-year="${g.year}"${off ? "" : " hidden"}>${g.year} total</th>`) : ""}`;
+  });
 
   const prowFor = (r) => {
     const per = periodize(r.monthlyCost, buckets, "sum");
-    return html`<tr class="prow ${r.scenario ? "scn" : ""}" data-dept="${r.department}" data-name="${(r.name || "").toLowerCase()}" data-role="${(r.role || "").toLowerCase()}" data-status="${(r.status || "").toLowerCase()}" data-start="${r.startDate || ""}" data-salary="${Math.round(r.annualBase)}" data-loaded="${Math.round(r.loadedMonthly)}">
+    return html`<tr class="${cx("prow", r.scenario && "scn", r.endDate && "ends")}" data-dept="${r.department}" data-name="${(r.name || "").toLowerCase()}" data-role="${(r.role || "").toLowerCase()}" data-status="${(r.status || "").toLowerCase()}" data-start="${r.startDate || ""}" data-salary="${Math.round(r.annualBase)}" data-loaded="${Math.round(r.loadedMonthly)}">
       <td class="rowhead">${r.name || "—"}</td>
       <td>${r.department}</td>
       <td>${r.role}</td>
       <td class="st">${r.status}</td>
-      <td class="num">${r.hireMonthLabel === "From start" ? "—" : r.hireMonthLabel}</td>
+      <td class="num">${r.hireMonthLabel === "From start" ? "—" : r.hireMonthLabel}${r.endDate ? html` <span class="muted" title="Leaves ${r.endDate}">→ ${String(r.endDate).slice(0, 7)}</span>` : ""}</td>
       <td class="num">${n0(r.annualBase)}</td>
       <td class="num">${n0(r.loadedMonthly)}</td>
-      ${isAdmin && r.id != null ? html`<td class="act"><form method="post" action="/roster/duplicate/${r.id}" class="inline">${csrfField(ctx)}<button class="linklike" type="submit" title="Duplicate this role">Duplicate</button></form></td>` : html`<td class="act"></td>`}
-      ${yearCells(per, groups)}
+      ${isAdmin && r.id != null ? html`<td class="act">
+        <form method="post" action="/roster/duplicate/${r.id}" class="inline">${csrfField(ctx)}<button class="linklike" type="submit" title="Duplicate this role">Duplicate</button></form>
+        ${r.endDate
+          ? html`<form method="post" action="/roster/${r.id}/restore" class="inline">${csrfField(ctx)}<button class="linklike" type="submit" title="Clear the end date">Restore</button></form>`
+          : html`<form method="post" action="/roster/${r.id}/end" class="inline confirm-delete" data-confirm="Remove ${r.name || "this person"} from the model at the end of this month? You can restore them afterwards.">${csrfField(ctx)}<button class="linklike danger-link" type="submit" title="Remove this headcount from the model">End</button></form>`}
+      </td>` : html`<td class="act"></td>`}
+      ${yearCells(per, groups, collapsed)}
     </tr>`;
   };
 
   const grandTotal = html`<tr class="grp total-grp">
     <td class="rowhead grplabel"><b>Total fully-loaded cost</b></td>
     <td class="grpfill" colspan="${LABELS - 1}"></td>
-    ${yearCells(periodize(totalMonthlyCost, buckets, "sum"), groups)}
+    ${yearCells(periodize(totalMonthlyCost, buckets, "sum"), groups, collapsed)}
   </tr>`;
 
   const deptBlocks = departments.map((d) => {
@@ -173,7 +225,7 @@ export function financialModelPage(ctx, model, extra = {}) {
     const head = html`<tr class="grp" data-dept="${d}">
       <td class="rowhead grplabel"><button type="button" class="grptoggle" data-dept="${d}" aria-label="Collapse ${d}">▾</button> <b>${d}</b> <span class="muted">(${members.length})</span></td>
       <td class="grpfill" colspan="${LABELS - 1}"></td>
-      ${yearCells(sub, groups)}
+      ${yearCells(sub, groups, collapsed)}
     </tr>`;
     return html`${head}${members.map(prowFor)}`;
   });
@@ -201,7 +253,7 @@ export function financialModelPage(ctx, model, extra = {}) {
   const summary = years.length >= 2 ? (() => {
     const a = years[0], b = years[years.length - 1];
     const row = (label, va, vb, fmt) => html`<tr><td class="rowhead">${label}</td><td class="num">${fmt(va)}</td><td class="num">${fmt(vb)}</td><td class="num">${fmt(vb - va)}</td><td class="num">${pctChg(vb, va)}%</td></tr>`;
-    return html`<h2 style="margin:22px 0 8px">Annual summary</h2>
+    return html`<h2 class="sum-h">Annual summary</h2>
       <table class="sheet summary">
         <thead><tr><th class="rowhead">Metric</th><th class="num">${a.year}</th><th class="num">${b.year}</th><th class="num">Change</th><th class="num">%</th></tr></thead>
         <tbody>
@@ -214,16 +266,11 @@ export function financialModelPage(ctx, model, extra = {}) {
 
   const range = cols.length ? `${cols[0].fullLabel} – ${cols[cols.length - 1].fullLabel}` : "";
   const body = html`
-    <div class="hm-band">
-      <div class="hm-logo">HQ</div>
-      <div><div class="hm-title">HEADCOUNT MODEL${extra.dept ? " · " + extra.dept : ""}</div><div class="hm-sub">${range} · fully-loaded (base + ${benefitsPct}% benefits/taxes)${extra.dept ? " · one department (summary scoped)" : ""}</div></div>
-    </div>
-    ${versionBar(ctx, extra)}
+    <div class="hm-line">Headcount model${extra.dept ? " · " + extra.dept : ""} <span class="muted">${range} · fully loaded (base + ${benefitsPct}% benefits/taxes)</span></div>
     ${dash}
     ${controls}
+    ${planBar(ctx, extra)}
     ${planEditor(ctx, extra)}
-    <div class="model-search"><input id="f-search" type="search" placeholder="Search name / role / dept" aria-label="Search"></div>
-    <p class="muted small" style="margin:0 0 8px">Tip: click a department (▾) to collapse its people, or a year (–) to collapse its columns. Sort by any header.</p>
     <div class="sheet-wrap">${rosterTable}</div>
     ${summary}
     <script src="/static/model.js" defer></script>`;

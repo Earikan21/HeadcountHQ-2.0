@@ -549,4 +549,13 @@ export const MIGRATIONS = [
       db.exec(`ALTER TABLE plan_versions ADD COLUMN assumptions_json TEXT NOT NULL DEFAULT '{}';`);
     },
   },
+  {
+    name: "2026_07_07_023_employee_end_date",
+    up(db) {
+      // Removing headcount: after this date a person stops contributing cost to the
+      // model. NULL means "still here". Paired with scenario hires' end_month, which
+      // lets a plan add headcount for a limited time.
+      db.exec(`ALTER TABLE employees ADD COLUMN end_date TEXT;`);
+    },
+  },
 ];

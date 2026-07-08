@@ -20,6 +20,7 @@ export const SCHEMA = [
   { key: "employee_type",       label: "Employee Type",       required: false, syn: ["employeetype","emptype","workertype","type","classification","fteclass"] },
   { key: "employment_status",   label: "Employment Status",   required: false, syn: ["employmentstatus","status","empstatus","activestatus","workerstatus"] },
   { key: "start_date",          label: "Start date",          required: false, syn: ["startdate","start","hiredate","datehired","dateofhire","doh","hired","joindate","joined","joiningdate","begindate","tenurestart","senioritydate","originalhiredate"] },
+  { key: "end_date",            label: "End date",            required: false, syn: ["enddate","end","termdate","terminationdate","dateterminated","separationdate","exitdate","leavedate","departuredate","lastday","lastdayworked","contractend"] },
 ];
 
 export const DEFAULT_ASSUMPTIONS = { hoursPerYear: 2080, daysPerYear: 260, weeksPerYear: 52 };
@@ -172,6 +173,7 @@ export function buildCanonical(rawRows, mapping, assumptions, opts = {}) {
     const unitKey = normUnit(get(raw, "compensation_unit")) || "annual";
     const status = normStatus(get(raw, "employment_status"));
     const startDate = normalizeDate(get(raw, "start_date"));
+    const endDate = normalizeDate(get(raw, "end_date"));
     const annual = toAnnual(amount, unitKey, assumptions);
 
     if (!id) issues.push({ level: "error", field: "employee_id", msg: "Missing Employee ID" });
@@ -210,6 +212,7 @@ export function buildCanonical(rawRows, mapping, assumptions, opts = {}) {
       compensation_unit: unitKey,
       annual_salary: annual,
       start_date: startDate,
+      end_date: endDate,
       _status: status,
       _issues: issues,
       _ok: !hasError,

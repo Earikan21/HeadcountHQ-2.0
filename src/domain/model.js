@@ -38,7 +38,7 @@ export function monthColumns(start, months) {
 
 /** Derive a window from the roster: from the earliest start month (item 7) through
  *  a year past the latest hire, so past and future are both visible. */
-export function deriveWindow(employees, now = new Date()) {
+export function deriveWindow(employees, now = new Date(), horizonMonths = 60) {
   const starts = [];
   for (const e of employees) {
     // Don't stretch the window back for departed staff — with no end date they add
@@ -50,9 +50,10 @@ export function deriveWindow(employees, now = new Date()) {
   const nowAbs = absOf(now.getFullYear(), now.getMonth());
   const startAbs = starts.length ? Math.min(...starts, nowAbs) : absOf(now.getFullYear(), 0);
   // Look back to the earliest start, and forward FIVE years (60 months) from now.
-  const endAbs = Math.max(nowAbs + 60, ...(starts.length ? starts.map((a) => a + 12) : [nowAbs + 60]));
+  const hz = Math.max(12, Math.min(120, Number(horizonMonths) || 60));
+  const endAbs = Math.max(nowAbs + hz, ...(starts.length ? starts.map((a) => a + 12) : [nowAbs + hz]));
   let months = endAbs - startAbs + 1;
-  months = Math.max(24, Math.min(132, months));
+  months = Math.max(12, Math.min(180, months));
   return { start: { year: Math.floor(startAbs / 12), month0: startAbs % 12 }, months };
 }
 
@@ -62,8 +63,9 @@ export function scenarioEmployees(scenarioHires = []) {
   for (const h of scenarioHires || []) {
     const count = Math.max(1, Math.min(200, Number(h.count) || 1));
     const start = h.start_month ? (String(h.start_month).length === 7 ? h.start_month + "-01" : String(h.start_month)) : null;
+    const end = h.end_month ? (String(h.end_month).length === 7 ? h.end_month + "-01" : String(h.end_month)) : null;
     for (let i = 0; i < count; i++) {
-      out.push({ name: h.role || "Scenario hire", job_title: h.role || "Scenario hire", department_name: h.department || "(scenario)", annual_salary: Number(h.annual_salary) || 0, start_date: start, employment_status: "active", _scenario: true });
+      out.push({ name: h.role || "Scenario hire", job_title: h.role || "Scenario hire", department_name: h.department || "(scenario)", annual_salary: Number(h.annual_salary) || 0, start_date: start, end_date: end, employment_status: "active", _scenario: true });
     }
   }
   return out;
@@ -95,7 +97,8 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
     return s && e.start_date ? { ...e, start_date: shiftMonthStr(e.start_date, s) } : e;
   });
   const all = employees.concat(scen);
-  if (!start || !months) { const w = deriveWindow(all, now); start = start || w.start; months = months || w.months; }
+  const horizonMonths = Math.max(12, Math.min(120, (Number(assumptions.horizonYears) || 5) * 12));
+  if (!start || !months) { const w = deriveWindow(all, now, horizonMonths); start = start || w.start; months = months || w.months; }
   const cols = monthColumns(start, months);
   const startAbs = absOf(start.year, start.month0);
   const benefitsPct = Math.round((globalMult - 1) * 1000) / 10;
@@ -110,7 +113,9 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
     const inactive = String(e.employment_status || "").toLowerCase() === "inactive";
     const p = parseMonth(e.start_date);
     const hireIdx = p ? absOf(p.year, p.month0) - startAbs : 0;
-    const active = cols.map((c) => (!inactive && c.index >= hireIdx ? 1 : 0));
+    const pe = parseMonth(e.end_date);
+    const endIdx = pe ? absOf(pe.year, pe.month0) - startAbs : Infinity;
+    const active = cols.map((c) => (!inactive && c.index >= hireIdx && c.index <= endIdx ? 1 : 0));
     const monthlyCost = active.map((a, i) => a * loadedMonthly * ea.bonus * (ea.growth ? Math.pow(1 + ea.growth / 100, Math.max(0, cols[i].year - growthBaseYear)) : 1));
     if (ea.costPerHire && p && hireIdx >= 0 && hireIdx < months) monthlyCost[hireIdx] += ea.costPerHire;
     return {
@@ -119,7 +124,7 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
       annualBase: annual, monthlyBase, monthlyBenefits, loadedMonthly,
       hireMonthLabel: hireIdx > 0 && hireIdx < months ? cols[hireIdx].fullLabel : (hireIdx <= 0 ? "From start" : "After window"),
       id: e.id != null ? e.id : null, extId: e.employee_ext_id || "",
-      startDate: e.start_date || "", scenario: !!e._scenario, active, monthlyCost,
+      startDate: e.start_date || "", endDate: e.end_date || "", scenario: !!e._scenario, active, monthlyCost,
     };
   });
   roster.sort((a, b) => a.department.localeCompare(b.department) || a.role.localeCompare(b.role) || a.name.localeCompare(b.name));

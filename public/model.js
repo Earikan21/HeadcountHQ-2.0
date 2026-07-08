@@ -38,29 +38,23 @@
     });
   });
 
-  // ---- filters ----
-  var fSearch = document.getElementById("f-search"), fDept = document.getElementById("f-dept"), fMin = document.getElementById("f-min"), fMax = document.getElementById("f-max");
+  // ---- filters (one line: search + department scope) ----
+  var fSearch = document.getElementById("f-search"), fDept = document.getElementById("f-dept");
   function applyFilters() {
     var q = (fSearch && fSearch.value || "").trim().toLowerCase();
-    var min = fMin && fMin.value !== "" ? Number(fMin.value) : null;
-    var max = fMax && fMax.value !== "" ? Number(fMax.value) : null;
     blocks().forEach(function (b) {
       var d = b.grp.getAttribute("data-dept");
       var anyVisible = false;
       b.prows.forEach(function (tr) {
-        var name = tr.getAttribute("data-name") || "", role = tr.getAttribute("data-role") || "", dd = tr.getAttribute("data-dept") || "", sal = Number(tr.getAttribute("data-salary") || 0);
-        var ok = true;
-        if (q && name.indexOf(q) < 0 && role.indexOf(q) < 0 && dd.toLowerCase().indexOf(q) < 0) ok = false;
-        if (min != null && sal < min) ok = false;
-        if (max != null && sal > max) ok = false;
-        if (ok && deptCollapsed[d]) { tr.style.display = "none"; }
-        else { tr.style.display = ok ? "" : "none"; }
+        var name = tr.getAttribute("data-name") || "", role = tr.getAttribute("data-role") || "", dd = tr.getAttribute("data-dept") || "";
+        var ok = !q || name.indexOf(q) >= 0 || role.indexOf(q) >= 0 || dd.toLowerCase().indexOf(q) >= 0;
+        tr.style.display = ok && !deptCollapsed[d] ? "" : "none";
         if (ok) anyVisible = true;
       });
       b.grp.style.display = anyVisible ? "" : "none";
     });
   }
-  [fSearch, fMin, fMax].forEach(function (el) { if (el) { el.addEventListener("input", applyFilters); el.addEventListener("change", applyFilters); } });
+  if (fSearch) { fSearch.addEventListener("input", applyFilters); fSearch.addEventListener("change", applyFilters); }
   // Department is a server-side scope (so the annual summary + subtotals recompute).
   if (fDept) fDept.addEventListener("change", function () {
     var u = new URL(window.location.href);
@@ -69,12 +63,15 @@
   });
 
   // ---- column (year) collapse ----
+  // The server already renders every year but the current one collapsed, so seed each
+  // toggle's state from its own label rather than assuming "expanded".
   Array.prototype.forEach.call(document.querySelectorAll(".ytoggle"), function (btn) {
-    var collapsed = false;
+    var collapsed = btn.textContent.trim() === "+";
     btn.addEventListener("click", function () {
       var y = btn.getAttribute("data-year");
       collapsed = !collapsed;
       btn.textContent = collapsed ? "+" : "–";
+      btn.setAttribute("aria-label", (collapsed ? "Expand " : "Collapse ") + y);
       // month/bucket cells for this year
       Array.prototype.forEach.call(sheet.querySelectorAll('[data-yb="' + y + '"]'), function (c) { c.hidden = collapsed; });
       // year-total cells for this year
@@ -84,6 +81,27 @@
       if (gh) gh.colSpan = collapsed ? 1 : Number(gh.getAttribute("data-span")) || gh.colSpan;
     });
   });
+
+  // ---- destructive actions ask first ----
+  Array.prototype.forEach.call(document.querySelectorAll("form.confirm-delete"), function (f) {
+    f.addEventListener("submit", function (ev) {
+      var msg = f.getAttribute("data-confirm") || "Are you sure? This cannot be undone.";
+      if (!window.confirm(msg)) ev.preventDefault();
+    });
+  });
+
+  // ---- open on the current month ----
+  // Past years arrive collapsed, so "now" sits a short scroll in; nudge it into view
+  // rather than leaving the sheet parked on the first month of history.
+  (function scrollToNow() {
+    var wrap = sheet.closest ? sheet.closest(".sheet-wrap") : null;
+    var nowTh = sheet.querySelector('th.mc[data-now="1"]');
+    if (!wrap || !nowTh || nowTh.hidden) return;
+    var firstHead = sheet.querySelector("th.rowhead");
+    var frozen = firstHead ? firstHead.getBoundingClientRect().width : 0;
+    var left = nowTh.offsetLeft - frozen - 24;
+    if (left > 0) wrap.scrollLeft = left;
+  })();
 
   // ---- sort (within each department block) ----
   var dir = {};

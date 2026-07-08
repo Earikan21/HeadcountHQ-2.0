@@ -4,7 +4,8 @@
  * goes through the auto-escaping `html` tag from ../html.js.
  */
 import { html, raw, esc } from "../html.js";
-import { canViewCompTotals, canUseAssistant, displayRole } from "../authz.js";
+import { canViewCompTotals, canUseAssistant, displayRole, canViewBudgets, canSetBudgets } from "../authz.js";
+import { listPlans } from "../repos/plans.js";
 
 /** A hidden CSRF input bound to the request's double-submit token. */
 export function csrfField(ctx) {
@@ -28,8 +29,22 @@ export const moneyRange = (a, b) =>
  */
 const CONSOLIDATED = new Set(["dashboard", "roster", "headcount", "departments"]);
 
+/**
+ * The plan versions shown as indented children of "Financial model" (item 1). The
+ * live roster is "Actual"; every named plan layers scenario hires on top of it.
+ */
+function modelNavOf(ctx, active) {
+  const user = ctx.user;
+  if (!user || user.role === "manager" || !ctx.db || !canViewBudgets(user)) return null;
+  let plans = [];
+  try { plans = listPlans(ctx.db); } catch { plans = []; }
+  const onModel = active === "model";
+  const version = Number(ctx.query.get("version")) || null;
+  return { plans, currentId: onModel ? version : null, onModel, canEdit: canSetBudgets(user) };
+}
+
 /** Grouped navigation appropriate to the current user + enabled features. */
-function navGroups(user, active, features = {}) {
+function navGroups(user, active, features = {}, modelNav = null) {
   if (!user) return [];
   const I = (href, label, key) => ({ href, label, on: active === key });
 
@@ -40,7 +55,15 @@ function navGroups(user, active, features = {}) {
   const groups = [{ label: "Dashboard", items: dash }];
 
   if (user.role !== "manager") {
-    const plan = [I("/model", "Financial model", "model")];
+    const model = I("/model", "Financial model", "model");
+    if (modelNav) {
+      model.on = modelNav.onModel; // the parent stays lit for any plan
+      model.children = [{ href: "/model", label: "Actual", on: modelNav.onModel && !modelNav.currentId }].concat(
+        modelNav.plans.map((p) => ({ href: `/model?version=${p.id}`, label: p.name, on: modelNav.onModel && modelNav.currentId === p.id }))
+      );
+      model.addPlan = modelNav.canEdit;
+    }
+    const plan = [model];
     if (features.planning) plan.push(I("/planning", "Planning", "planning"));
     groups.push({ label: "Model", items: plan });
   }
@@ -61,12 +84,17 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
   const user = ctx.user;
   const flashMsg = flash || ctx.query.get("msg") || "";
   const features = (ctx.config && ctx.config.features) || {};
-  const groups = navGroups(user, active, features);
+  const groups = navGroups(user, active, features, modelNavOf(ctx, active));
   const subtabs = dashboardTabs(user, active);
   const showAssistant = !!(user && canUseAssistant(user) && ctx.config && ctx.config.aiImportConfigured);
+  const navItem = (it) => html`${raw(`<a href="${it.href}" class="nav-link ${it.on ? "on" : ""}">${esc(it.label)}</a>`)}${
+    it.children ? html`<div class="nav-children">
+      ${it.children.map((ch) => raw(`<a href="${ch.href}" class="nav-sublink ${ch.on ? "on" : ""}">${esc(ch.label)}</a>`))}
+      ${it.addPlan ? html`<form method="post" action="/model/versions" class="nav-newplan">${csrfField(ctx)}<input name="name" placeholder="New plan" aria-label="New plan name"><button type="submit" class="np-add" title="Add plan" aria-label="Add plan">+</button></form>` : ""}
+    </div>` : ""}`;
   const navHtml = groups.map((g) => html`<div class="nav-group">
       <div class="nav-group-label">${g.label}</div>
-      ${g.items.map((it) => raw(`<a href="${it.href}" class="nav-link ${it.on ? "on" : ""}">${esc(it.label)}</a>`))}
+      ${g.items.map(navItem)}
     </div>`);
 
   return html`<!DOCTYPE html>
