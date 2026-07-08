@@ -558,4 +558,60 @@ export const MIGRATIONS = [
       db.exec(`ALTER TABLE employees ADD COLUMN end_date TEXT;`);
     },
   },
+  {
+    name: "2026_07_07_024_ai_full_read_on_by_default",
+    up(db) {
+      // Directive 4.0: full-read AI import is on out of the box, like the rest of AI assist.
+      db.exec(`UPDATE workspace_settings SET ai_full_read_enabled = 1 WHERE workspace_id = 1;`);
+    },
+  },
+  {
+    name: "2026_07_08_025_plan_overrides",
+    up(db) {
+      // An editable plan sheet must never rewrite the roster, or "base case" and
+      // "board plan" would fight over the same employee rows and Actual would become
+      // fiction. A plan instead stores SPARSE overrides keyed by employee_ext_id:
+      //   {"E-1": {"annual_salary": 140000}}
+      // Only the fields you actually changed are stored, so a later roster import
+      // still flows through for everything you didn't touch, and "reset this row"
+      // means exactly "delete this key".
+      db.exec(`ALTER TABLE plan_versions ADD COLUMN overrides_json TEXT NOT NULL DEFAULT '{}';`);
+    },
+  },
+  {
+    name: "2026_07_08_026_scenario_hire_identity",
+    up(db) {
+      // Scenario hires used to carry `count: 3` and were expanded into three
+      // indistinguishable rows at render time — you couldn't name or edit "the second
+      // AE" because it didn't exist as a record. Explode them into one record per
+      // person, each with a stable id. Idempotent: already-exploded hires (id set,
+      // no count) pass through unchanged.
+      const rows = db.prepare("SELECT id, hires_json FROM plan_versions").all();
+      const upd = db.prepare("UPDATE plan_versions SET hires_json = ? WHERE id = ?");
+      for (const r of rows) {
+        let hires;
+        try { hires = JSON.parse(r.hires_json); } catch { hires = []; }
+        if (!Array.isArray(hires)) hires = [];
+        const out = [];
+        let n = 0;
+        for (const h of hires) {
+          const count = Math.max(1, Math.min(200, Number(h.count) || 1));
+          const role = h.role || "Hire";
+          for (let i = 0; i < count; i++) {
+            n++;
+            out.push({
+              id: h.id && count === 1 ? String(h.id) : "h" + n,
+              department: h.department || "(scenario)",
+              role,
+              name: h.name || (count > 1 ? `${role} ${i + 1}` : role),
+              start_month: h.start_month || null,
+              end_month: h.end_month || null,
+              annual_salary: Number(h.annual_salary) || 0,
+            });
+          }
+        }
+        upd.run(JSON.stringify(out), r.id);
+      }
+    },
+  },
 ];

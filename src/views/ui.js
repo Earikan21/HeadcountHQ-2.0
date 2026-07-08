@@ -38,9 +38,9 @@ function modelNavOf(ctx, active) {
   if (!user || user.role === "manager" || !ctx.db || !canViewBudgets(user)) return null;
   let plans = [];
   try { plans = listPlans(ctx.db); } catch { plans = []; }
-  const onModel = active === "model";
-  const version = Number(ctx.query.get("version")) || null;
-  return { plans, currentId: onModel ? version : null, onModel, canEdit: canSetBudgets(user) };
+  const onModel = active === "model" || active === "compare";
+  const version = active === "model" ? Number(ctx.query.get("version")) || null : null;
+  return { plans, currentId: version, onModel, onCompare: active === "compare", canEdit: canSetBudgets(user) };
 }
 
 /** Grouped navigation appropriate to the current user + enabled features. */
@@ -58,9 +58,10 @@ function navGroups(user, active, features = {}, modelNav = null) {
     const model = I("/model", "Financial model", "model");
     if (modelNav) {
       model.on = modelNav.onModel; // the parent stays lit for any plan
-      model.children = [{ href: "/model", label: "Actual", on: modelNav.onModel && !modelNav.currentId }].concat(
-        modelNav.plans.map((p) => ({ href: `/model?version=${p.id}`, label: p.name, on: modelNav.onModel && modelNav.currentId === p.id }))
+      model.children = [{ href: "/model", label: "Actual", on: modelNav.onModel && !modelNav.onCompare && !modelNav.currentId }].concat(
+        modelNav.plans.map((p) => ({ href: `/model?version=${p.id}`, label: p.name, on: !modelNav.onCompare && modelNav.currentId === p.id }))
       );
+      if (modelNav.plans.length) model.children.push({ href: "/model/compare", label: "Compare…", on: modelNav.onCompare, cls: "cmp" });
       model.addPlan = modelNav.canEdit;
     }
     const plan = [model];
@@ -89,7 +90,7 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
   const showAssistant = !!(user && canUseAssistant(user) && ctx.config && ctx.config.aiImportConfigured);
   const navItem = (it) => html`${raw(`<a href="${it.href}" class="nav-link ${it.on ? "on" : ""}">${esc(it.label)}</a>`)}${
     it.children ? html`<div class="nav-children">
-      ${it.children.map((ch) => raw(`<a href="${ch.href}" class="nav-sublink ${ch.on ? "on" : ""}">${esc(ch.label)}</a>`))}
+      ${it.children.map((ch) => raw(`<a href="${ch.href}" class="${["nav-sublink", ch.cls, ch.on && "on"].filter(Boolean).join(" ")}">${esc(ch.label)}</a>`))}
       ${it.addPlan ? html`<form method="post" action="/model/versions" class="nav-newplan">${csrfField(ctx)}<input name="name" placeholder="New plan" aria-label="New plan name"><button type="submit" class="np-add" title="Add plan" aria-label="Add plan">+</button></form>` : ""}
     </div>` : ""}`;
   const navHtml = groups.map((g) => html`<div class="nav-group">

@@ -1,7 +1,7 @@
 /**
- * The first-run welcome / setup screen (Directive 4.0). Shown to an admin whose
- * workspace has no roster yet, in place of the empty "zeros" dashboard: two guided
- * steps (import roster → set budget) that light up the budget dashboard.
+ * The first-run welcome screen. Shown to an admin whose workspace has no roster yet,
+ * in place of an empty "zeros" dashboard: one step — import the roster — which is all
+ * it takes to light up the financial model.
  */
 import { html, raw } from "../html.js";
 import { renderPage } from "./ui.js";
@@ -17,17 +17,17 @@ function stepCard(n, title, desc, done, href, cta) {
   </section>`;
 }
 
-export function welcomePage(ctx, { rosterDone = false, budgetDone = false } = {}) {
+export function welcomePage(ctx, { rosterDone = false } = {}) {
   const name = String(ctx.user.name || "").split(" ")[0];
   const body = html`
     <div class="pagehead">
       <h1>Welcome${name ? ", " + name : ""}</h1>
-      <p class="muted">Let's set up this workspace. Import your roster and your model comes to life.</p>
+      <p class="muted">One step. Import your roster and the financial model builds itself.</p>
     </div>
-    ${stepCard(1, "Import your roster", "Upload a CSV (Excel: File → Save As → CSV first) of your people — include a start-date column. We turn it into departments, seats, and a fully-loaded cost model — your single source of truth. Everything is processed on your own server.", rosterDone, "/roster/import", "Import roster")}
+    ${stepCard(1, "Import your roster", "Upload an Excel workbook (.xlsx) or a CSV of your people — include a start-date column. We turn it into departments, seats, and a fully-loaded cost model that runs up to ten years out. Everything is processed on your own server.", rosterDone, "/roster/import", "Import roster")}
     <section class="card">
       <h2>Then what?</h2>
-      <p class="muted small">Your <b>People</b> view and <b>Budget dashboard</b> update automatically as data comes in. Fine-tune the rules any time under <a href="/philosophy">Philosophy</a>.</p>
+      <p class="muted small">Your <b>People</b> view and <b>Financial model</b> fill in automatically. From there you can scope to a department, plan hires under a named scenario, and ask the assistant about any of it.</p>
       <a class="btn ghost" href="/?home=1">Skip to dashboard &rarr;</a>
     </section>`;
   return renderPage(ctx, { title: "Welcome", body, active: "dashboard" });

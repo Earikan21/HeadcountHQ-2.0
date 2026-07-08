@@ -15,6 +15,7 @@
  * import pipeline below is the seam they plug into.
  */
 import { parseMatrix } from "./csv.js";
+import { parseXlsx } from "./xlsx.js";
 
 const ext = (filename) => String(filename || "").toLowerCase().split(".").pop();
 
@@ -26,8 +27,16 @@ export const csvAdapter = {
   parse(buffer) { return parseMatrix(buffer.toString("utf8")); },
 };
 
-// Registry — add adapters here (e.g. an XLSX adapter, or a connector adapter).
-const ADAPTERS = [csvAdapter];
+export const xlsxAdapter = {
+  id: "xlsx",
+  label: "Excel workbook",
+  extensions: ["xlsx", "xlsm"],
+  sniff(filename) { return ["xlsx", "xlsm"].includes(ext(filename)); },
+  parse(buffer) { return parseXlsx(buffer); },
+};
+
+// Registry — add adapters here (e.g. a connector adapter).
+const ADAPTERS = [csvAdapter, xlsxAdapter];
 
 export function listAdapters() { return ADAPTERS.map((a) => ({ id: a.id, label: a.label, extensions: a.extensions })); }
 
@@ -40,10 +49,15 @@ export function parseUpload(filename, buffer) {
   const adapter = adapterFor(filename);
   if (!adapter) {
     const e = String(ext(filename));
-    const hint = e === "xlsx" || e === "xls"
-      ? "Excel isn't supported directly — in Excel choose File → Save As → CSV, then upload that."
-      : "Unsupported file type. Upload a .csv file.";
+    const hint = e === "xls"
+      ? "That's the old binary .xls format. In Excel choose File \u2192 Save As \u2192 .xlsx (or .csv), then upload that."
+      : "Unsupported file type. Upload a .xlsx or .csv file.";
     return { error: hint, matrix: null };
   }
-  return { error: null, matrix: adapter.parse(buffer), adapter: adapter.id };
+  // A malformed workbook shouldn't take the request down — surface it as an error.
+  try {
+    return { error: null, matrix: adapter.parse(buffer), adapter: adapter.id };
+  } catch (e) {
+    return { error: (e && e.message) || "That file couldn't be read.", matrix: null };
+  }
 }

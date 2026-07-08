@@ -10,11 +10,14 @@ import { expectedRange } from "../domain/budget.js";
 import { listDepartments } from "../repos/departments.js";
 import { getSettings } from "../repos/settings.js";
 import { financialModelPage } from "../views/model.js";
-import { buildHeadcountModel } from "../domain/model.js";
+import { buildHeadcountModel, applyPlanOverrides, periodBuckets, periodize, yearGroupsOf, modelKpis, windowKey } from "../domain/model.js";
+import { alignedWindow, comparePlans } from "../domain/compare.js";
+import { comparePage } from "../views/compare.js";
 import { listEmployees } from "../repos/roster.js";
 import { clientFromConfig, parseScenarioHires } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
-import { listPlans, getPlan, createPlan, planHires, setPlanHires, deletePlan, planAssumptions, setPlanAssumptions } from "../repos/plans.js";
+import { listPlans, getPlan, createPlan, duplicatePlan, planHires, setPlanHires, deletePlan, planAssumptions, setPlanAssumptions, planOverrides, setPlanOverrides, nextHireId } from "../repos/plans.js";
+import { parseCellEdit, applyCellEdit } from "../domain/plan_edit.js";
 
 /** Money a department's headcount budget implies: current cost + midpoint of the
  *  expected cost of its still-unfilled budgeted positions. Idempotent. */
@@ -31,7 +34,9 @@ export function registerBudgetRoutes(router) {
     const plans = listPlans(ctx.db);
     const current = versionId ? getPlan(ctx.db, versionId) : null;
     const hires = planHires(current);
-    const allEmployees = listEmployees(ctx.db, {});
+    const overrides = current ? planOverrides(current) : {};
+    // Overrides are plan-local: `listEmployees` is never written to from here.
+    const allEmployees = applyPlanOverrides(listEmployees(ctx.db, {}), overrides);
     const allDepartments = [...new Set(allEmployees.map((e) => e.department_name || "(none)"))].sort();
     const dept = ctx.query.get("dept") || null;
     const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
@@ -41,9 +46,85 @@ export function registerBudgetRoutes(router) {
     const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions });
     ctx.html(200, financialModelPage(ctx, model, {
       period: ctx.query.get("period"), plans, current, hires, dept, allDepartments, assumptions,
-      canEdit: canSetBudgets(ctx.user), aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
+      canEdit: canSetBudgets(ctx.user),
+      // The sheet is editable only inside a plan, and only for someone who may edit it.
+      editable: Boolean(current) && canSetBudgets(ctx.user),
+      aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
     }));
   };
+  /** Back to the sheet, preserving the department scope + period the user was in. */
+  const backToModel = (ctx, planId) => {
+    const dept = String(ctx.body.dept || "").trim();
+    const period = String(ctx.body.period || "").trim();
+    return `/model?version=${planId}` +
+      (dept ? "&dept=" + encodeURIComponent(dept) : "") +
+      (["month", "quarter", "year"].includes(period) ? "&period=" + period : "");
+  };
+
+  /**
+   * Rebuild the model after an edit and slice out just what changed: the edited row,
+   * its department subtotal, the grand total, the KPI strip, and the annual summary.
+   * Values arrive pre-formatted so the browser never has to know how to price anyone.
+   */
+  const recompute = (ctx, plan, key) => {
+    const overrides = planOverrides(plan);
+    const hires = planHires(plan);
+    const dept = String(ctx.body.dept || "").trim() || null;
+    const period = ["month", "quarter", "year"].includes(String(ctx.body.period)) ? String(ctx.body.period) : "month";
+
+    const all = applyPlanOverrides(listEmployees(ctx.db, {}), overrides);
+    const employees = dept ? all.filter((e) => (e.department_name || "(none)") === dept) : all;
+    const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
+    const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
+    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions: planAssumptions(plan) });
+
+    const buckets = periodBuckets(model.cols, period);
+    const groups = yearGroupsOf(model.cols, buckets);
+    const series = (monthly) => {
+      const per = periodize(monthly, buckets, "sum");
+      const yearTotals = {};
+      for (const g of groups) if (g.pos.length > 1) {
+        const t = g.pos.reduce((a, i) => a + per[i], 0);
+        yearTotals[g.year] = { v: Math.round(t), t: t ? moneyShort(t) : "" };
+      }
+      return { cells: per.map((v) => ({ v: Math.round(v), t: v ? moneyShort(v) : "" })), yearTotals };
+    };
+
+    const rowOf = (r) => (key.startsWith("hire:") ? r.hireId === key.slice(5) : r.extId === key.slice(4));
+    const row = model.roster.find(rowOf) || null;
+    const k = modelKpis(model, new Date());
+    const n0 = (v) => Math.round(Number(v) || 0).toLocaleString("en-US");
+    const pctChg = (a, b) => (b ? Math.round(((a - b) / b) * 1000) / 10 : 0);
+
+    return {
+      row: row ? {
+        ...series(row.monthlyCost),
+        loaded: n0(row.loadedMonthly),
+        base: n0(row.annualBase),
+        starts: row.hireMonthLabel === "From start" ? "—" : row.hireMonthLabel,
+        gone: row.endDate ? String(row.endDate).slice(0, 7) : "",
+      } : null,
+      dept: row ? { name: row.department, ...series(model.deptMonthlyCost[row.department] || []) } : null,
+      total: series(model.totalMonthlyCost),
+      kpis: {
+        headcount: n0(k.curHc), spend: money(k.thisYearCost), next12: money(k.next12Cost),
+        netnew: `${k.netNew >= 0 ? "+" : ""}${n0(k.netNew)}`, avghead: money(k.avgHead), depts: n0(k.deptCount),
+      },
+      // Keyed by year and fingerprinted: if the edit moved the window, the client
+      // reloads rather than patching numbers into cells that no longer mean the same thing.
+      windowKey: windowKey(model, period),
+      summary: Object.fromEntries(model.years.map((y, i) => {
+        const prev = i > 0 ? model.years[i - 1] : null;
+        const comparable = prev && prev.months === 12 && y.months === 12;
+        const yoy = comparable ? pctChg(y.totalCost, prev.totalCost) : null;
+        return [String(y.year), [
+          n0(y.yearEndHc), money(y.totalCost), n0(y.avgHc), money(y.avgCostPerHead),
+          yoy == null ? "—" : (yoy > 0 ? "+" : "") + yoy + "%",
+        ]];
+      })),
+    };
+  };
+
   const currentVersionId = (ctx) => {
     const v = Number(ctx.query.get("version")) || null;
     return v && getPlan(ctx.db, v) ? v : null;
@@ -62,6 +143,55 @@ export function registerBudgetRoutes(router) {
     ctx.redirect(`/model?version=${plan.id}`);
   });
 
+  // Copy a plan whole — hires, assumptions and per-employee overrides.
+  router.post("/model/versions/:id/duplicate", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const copy = duplicatePlan(ctx.db, plan);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "plan.duplicated", entity: "plan_version", entityId: copy.id, detail: { from: plan.id, name: copy.name } });
+    ctx.redirect(`/model?version=${copy.id}`);
+  });
+
+  /**
+   * Compare any two versions of the future, Actual included. Both sides are built over
+   * one aligned window — otherwise a 10-year plan and a 3-year plan wouldn't be
+   * describing the same years, and the deltas would be quietly meaningless.
+   */
+  router.get("/model/compare", (ctx) => {
+    if (!requirePermission(ctx, canViewBudgets)) return;
+    const plans = listPlans(ctx.db);
+    const roster = listEmployees(ctx.db, {});
+    const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
+
+    /** "actual" or a plan id -> everything needed to build that side. */
+    const sideOf = (raw) => {
+      const plan = raw === "actual" ? null : plans.find((p) => String(p.id) === String(raw));
+      return {
+        id: plan ? String(plan.id) : "actual",
+        label: plan ? plan.name : "Actual",
+        employees: roster, hires: planHires(plan),
+        overrides: plan ? planOverrides(plan) : {},
+        assumptions: plan ? planAssumptions(plan) : {},
+      };
+    };
+    const aSpec = sideOf(ctx.query.get("a") || "actual");
+    const bSpec = sideOf(ctx.query.get("b") || (plans[0] ? String(plans[0].id) : "actual"));
+
+    const win = alignedWindow([aSpec, bSpec], new Date());
+    const build = (spec) => ({
+      label: spec.label,
+      model: buildHeadcountModel({
+        employees: applyPlanOverrides(spec.employees, spec.overrides),
+        loadedMultiplier: mult, scenarioHires: spec.hires, assumptions: spec.assumptions,
+        start: win.start, months: win.months,
+      }),
+    });
+
+    const diff = comparePlans(build(aSpec), build(bSpec));
+    ctx.html(200, comparePage(ctx, { diff, plans, a: aSpec.id, b: bSpec.id }));
+  });
+
   router.post("/model/versions/:id/delete", (ctx) => {
     if (!requirePermission(ctx, canSetBudgets)) return;
     deletePlan(ctx.db, Number(ctx.params.id));
@@ -76,25 +206,75 @@ export function registerBudgetRoutes(router) {
     const b = ctx.body;
     if (String(b.scn_department || "").trim() && Number(b.scn_salary) > 0) {
       const hires = planHires(plan);
-      hires.push({
-        department: String(b.scn_department).trim(), role: String(b.scn_role || "Hire").trim(),
-        start_month: /^\d{4}-\d{2}$/.test(String(b.scn_start || "")) ? b.scn_start : null,
-        end_month: /^\d{4}-\d{2}$/.test(String(b.scn_end || "")) ? b.scn_end : null,
-        annual_salary: Number(b.scn_salary) || 0, count: Math.max(1, Number(b.scn_count) || 1),
-      });
+      // One record per person, each individually nameable and editable on the sheet.
+      const count = Math.max(1, Math.min(200, Number(b.scn_count) || 1));
+      const role = String(b.scn_role || "Hire").trim() || "Hire";
+      for (let i = 0; i < count; i++) {
+        hires.push({
+          id: nextHireId(hires), department: String(b.scn_department).trim(), role,
+          name: count > 1 ? `${role} ${i + 1}` : role,
+          start_month: /^\d{4}-\d{2}$/.test(String(b.scn_start || "")) ? b.scn_start : null,
+          end_month: /^\d{4}-\d{2}$/.test(String(b.scn_end || "")) ? b.scn_end : null,
+          annual_salary: Number(b.scn_salary) || 0,
+        });
+      }
       setPlanHires(ctx.db, plan.id, hires);
     }
     ctx.redirect(`/model?version=${plan.id}`);
   });
 
-  router.post("/model/versions/:id/hire/:idx/delete", (ctx) => {
+  // Delete by stable id: array positions shift under concurrent edits.
+  router.post("/model/versions/:id/hire/:hid/delete", (ctx) => {
     if (!requirePermission(ctx, canSetBudgets)) return;
     const plan = getPlan(ctx.db, Number(ctx.params.id));
     if (!plan) return ctx.redirect("/model");
     const hires = planHires(plan);
-    const idx = Number(ctx.params.idx);
-    if (idx >= 0 && idx < hires.length) { hires.splice(idx, 1); setPlanHires(ctx.db, plan.id, hires); }
-    ctx.redirect(`/model?version=${plan.id}`);
+    const hid = String(ctx.params.hid);
+    const next = hires.filter((h) => String(h.id) !== hid);
+    if (next.length !== hires.length) setPlanHires(ctx.db, plan.id, next);
+    ctx.redirect(backToModel(ctx, plan.id));
+  });
+
+  /**
+   * Autosave one cell of the plan sheet. Persists, then recomputes the model
+   * server-side and returns the affected numbers already formatted — the cost engine
+   * is never reimplemented in the browser.
+   */
+  router.post("/model/versions/:id/cell", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.json(404, { ok: false, error: "That plan no longer exists — reload." });
+
+    const edit = parseCellEdit(ctx.body);
+    if (edit.error) return ctx.json(400, { ok: false, error: edit.error, field: ctx.body.field });
+
+    const roster = listEmployees(ctx.db, {});
+    const res = applyCellEdit({ edit, roster, hires: planHires(plan), overrides: planOverrides(plan) });
+    if (res.error) return ctx.json(400, { ok: false, error: res.error, field: edit.field });
+
+    if (res.hires) setPlanHires(ctx.db, plan.id, res.hires);
+    if (res.overrides) setPlanOverrides(ctx.db, plan.id, res.overrides);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "plan.cell_edited", entity: "plan_version", entityId: plan.id, detail: { key: edit.key, field: edit.field } });
+
+    const fresh = getPlan(ctx.db, plan.id);
+    return ctx.json(200, { ok: true, value: res.value, overridden: res.overridden, marks: res.marks, ...recompute(ctx, fresh, edit.key) });
+  });
+
+  /** Clear a row: drop the employee's overrides, or remove the scenario hire outright. */
+  router.post("/model/versions/:id/row/reset", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const key = String(ctx.body.key || "");
+    if (key.startsWith("hire:")) {
+      const hid = key.slice(5);
+      setPlanHires(ctx.db, plan.id, planHires(plan).filter((h) => String(h.id) !== hid));
+    } else if (key.startsWith("emp:")) {
+      const o = planOverrides(plan);
+      delete o[key.slice(4)];
+      setPlanOverrides(ctx.db, plan.id, o);
+    }
+    ctx.redirect(backToModel(ctx, plan.id));
   });
 
   // Save a plan's assumptions / drivers (YoY salary growth, benefits load override).
@@ -147,7 +327,22 @@ export function registerBudgetRoutes(router) {
       const client = clientFromConfig(ctx.config);
       const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), client });
       if (!parsed.length) return renderModel(ctx, plan.id, { aiError: "Couldn't turn that into a hire — name a department, count, start month, and salary." });
-      setPlanHires(ctx.db, plan.id, planHires(plan).concat(parsed));
+      // The model returns {department, role, count, ...}; explode into individually
+      // editable records so AI-added hires behave exactly like hand-added ones.
+      const hires = planHires(plan);
+      for (const h of parsed) {
+        const count = Math.max(1, Math.min(200, Number(h.count) || 1));
+        const role = String(h.role || "Hire").trim() || "Hire";
+        for (let i = 0; i < count; i++) {
+          hires.push({
+            id: nextHireId(hires), department: h.department || "(scenario)", role,
+            name: count > 1 ? `${role} ${i + 1}` : role,
+            start_month: h.start_month || null, end_month: h.end_month || null,
+            annual_salary: Number(h.annual_salary) || 0,
+          });
+        }
+      }
+      setPlanHires(ctx.db, plan.id, hires);
       ctx.redirect(`/model?version=${plan.id}`);
     } catch (e) {
       const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
@@ -194,7 +389,7 @@ export function registerBudgetRoutes(router) {
     const versionId = currentVersionId(ctx);
     const current = versionId ? getPlan(ctx.db, versionId) : null;
     const hires = planHires(current);
-    const allEmployees = listEmployees(ctx.db, {});
+    const allEmployees = applyPlanOverrides(listEmployees(ctx.db, {}), current ? planOverrides(current) : {});
     const dept = ctx.query.get("dept") || null;
     const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
     const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;

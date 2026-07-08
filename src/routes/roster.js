@@ -166,13 +166,13 @@ export function registerRosterRoutes(router) {
     if (!requirePermission(ctx, canImportRoster)) return;
     const file = ctx.files.file;
     if (!file || !file.data || !file.data.length) {
-      return ctx.html(400, uploadPage(ctx, { errors: ["Please choose a CSV file to upload."] }));
+      return ctx.html(400, uploadPage(ctx, { errors: ["Please choose an Excel (.xlsx) or CSV file to upload."] }));
     }
     const parsed = parseUpload(file.filename, file.data);
     if (parsed.error) return ctx.html(400, uploadPage(ctx, { errors: [parsed.error] }));
     const matrix = parsed.matrix;
     if (matrix.length < 2) {
-      return ctx.html(400, uploadPage(ctx, { errors: ["That file has no readable rows. Export your roster as CSV and try again."] }));
+      return ctx.html(400, uploadPage(ctx, { errors: ["That file has no readable rows. Check the sheet isn't empty, then try again."] }));
     }
     const headerRow = detectHeaderRow(matrix);
     const { headers } = matrixToRows(matrix, headerRow);
@@ -347,7 +347,7 @@ export function registerRosterRoutes(router) {
         provider: ctx.config.AI_IMPORT_PROVIDER, acceptedCount: titlesApplied + catsApplied });
     }
     logAudit(ctx.db, { userId: ctx.user.id, action: "import.committed", entity: "import_batch", entityId: batch.id, detail: { committed, titlesApplied, catsApplied } });
-    ctx.redirect(`/roster?msg=Imported+${committed}+employees`);
+    ctx.redirect(`/roster?imported=${committed}`);
   });
 
   router.post("/roster/import/:id/discard", (ctx) => {
@@ -374,10 +374,10 @@ function uploadPage(ctx, { errors }) {
     ${wizardSteps("upload")}
     ${errorList(errors)}
     <section class="card narrow">
-      <div class="flash">Upload your roster as a <b>.csv</b> file. Need Excel? In Excel choose <i>File → Save As → CSV</i> first. Everything is processed on your own server.</div>
+      <div class="flash">Upload your roster as an <b>Excel workbook</b> (.xlsx) or a <b>.csv</b>. Include a start-date column — and an end-date column if anyone has left or is leaving. Everything is processed on your own server.</div>
       <form method="post" action="/roster/import" enctype="multipart/form-data">
         ${csrfField(ctx)}
-        <label>Roster file (.csv)<input type="file" name="file" accept=".csv,text/csv" required></label>
+        <label>Roster file (.xlsx or .csv)<input type="file" name="file" accept=".xlsx,.xlsm,.csv,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required></label>
         <button class="btn" type="submit">Upload &amp; continue</button>
       </form>
     </section>

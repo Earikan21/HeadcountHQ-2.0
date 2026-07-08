@@ -424,3 +424,88 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
 .sheet.model td.act .endform { display: inline-flex; align-items: center; gap: 4px; }
 .sheet.model td.act .endmo { width: 118px; height: 24px; padding: 1px 4px; font-size: 11px; }
 .sheet.model th.acth { font-weight: 600; }
+
+/* ---- Fixes: nothing clipped, nothing cut off ------------------------------ */
+/* The sheet has two header rows. Both were `top:0`, so the second slid over the
+   first and the year labels vanished under the month labels. Stack them instead. */
+.sheet.model thead tr:first-child th { top: 0; z-index: 3; }
+.sheet.model thead tr:nth-child(2) th { top: 30px; z-index: 3; }
+.sheet.model thead th.rowhead, .sheet.model thead th.sortable { z-index: 4; }
+.sheet-wrap { max-height: 72vh; overflow: auto; }
+
+/* Money cells were clipping at their 46px floor once values reached "$1.24M". */
+.sheet.model th.mc, .sheet.model td.mc { min-width: 62px; padding: 6px 10px; }
+.sheet.model td.mc, .sheet.model th.mc { overflow: visible; text-overflow: clip; }
+.sheet.model td.num, .sheet.model th.sortable { min-width: 88px; }
+
+/* The global `input,select{padding:9px 11px}` clipped these short controls. */
+.plan-bar .pb-horizon select { height: 30px; min-width: 92px; padding: 3px 26px 3px 8px; font-size: 12.5px; line-height: 1.2; }
+.sheet.model td.act .endmo { height: 26px; }
+
+/* The scenario hire form: inputs inherited `width:100%`, so every field —
+   including the two month pickers — took a line of its own. */
+.plan-editor .scn-manual input { width: auto; height: 30px; padding: 4px 8px; font-size: 12.5px; }
+.plan-editor .scn-manual input[name="scn_department"] { width: 120px; }
+.plan-editor .scn-manual input[name="scn_role"] { width: 150px; }
+.plan-editor .scn-manual input[type="month"] { width: 132px; }
+.plan-editor .scn-manual input[name="scn_salary"] { width: 108px; }
+.plan-editor .scn-manual .tiny { width: 52px; }
+.plan-editor .scn-manual label.mo { gap: 5px; white-space: nowrap; }
+.asm input { height: 30px; padding: 4px 8px; }
+
+/* Post-import modal. */
+.modal-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(15, 23, 42, .45);
+  display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal { background: var(--panel, #fff); border-radius: 14px; box-shadow: var(--shadow-md);
+  padding: 22px 24px; max-width: 460px; width: 100%; }
+.modal h2 { margin: 0 0 6px; }
+.modal-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ---- Editable plan sheet ---------------------------------------------------- */
+.edit-hint { margin: 0 0 8px; }
+.sheet.model td.cell { padding: 2px 4px; }
+.sheet.model td.cell input.cell-input {
+  width: 100%; min-width: 88px; height: 26px; padding: 2px 6px; font: inherit; font-size: 12.5px;
+  border: 1px solid transparent; border-radius: 5px; background: transparent; color: inherit;
+}
+.sheet.model td.cell.rowhead input.cell-input { min-width: 140px; font-weight: 600; }
+.sheet.model td.cell input.cell-input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet.model td.cell input.cell-input:hover { border-color: var(--line, #e5e7eb); background: #fff; }
+.sheet.model td.cell input.cell-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); background: #fff; }
+.sheet.model td.cell input.cell-input.bad { border-color: #dc2626; background: #fef2f2; }
+/* A cell the plan has overridden — this number is not what the roster says. */
+.sheet.model td.cell.ovr { position: relative; background: #f5f3ff; }
+.sheet.model td.cell.ovr::after {
+  content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--brand, #6d28d9);
+}
+.save-pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2, #f3f4f6); color: var(--muted, #6b7280); white-space: nowrap; }
+.save-pill.ok { background: #ecfdf5; color: #047857; }
+.save-pill.err { background: #fef2f2; color: #b91c1c; }
+
+/* ---- Compare two plans -------------------------------------------------------- */
+.cmp-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
+.cmp-pick label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--muted, #6b7280); }
+.cmp-pick select { width: auto; min-width: 170px; height: 32px; padding: 4px 9px; font-size: 13px; }
+.cmp-vs { font-size: 12px; color: var(--muted, #9ca3af); text-transform: uppercase; letter-spacing: .06em; }
+
+.cmp-chart { margin: 6px 0 18px; padding: 12px 14px; border: 1px solid var(--line, #e5e7eb);
+  border-radius: var(--radius, 10px); background: var(--panel, #fff); }
+.cmp-chart svg { width: 100%; height: auto; display: block; }
+.cmp-chart .ax { stroke: var(--line, #e5e7eb); stroke-width: 1; }
+.cmp-chart .tick { fill: var(--muted, #9ca3af); font-size: 10px; }
+.cmp-chart .ln { fill: none; stroke-width: 2; }
+.cmp-chart .ln.a, .cmp-chart .dt.a { stroke: #94a3b8; fill: #94a3b8; }
+.cmp-chart .ln.b, .cmp-chart .dt.b { stroke: var(--brand, #6d28d9); fill: var(--brand, #6d28d9); }
+.cmp-chart .ln.a { stroke-dasharray: 5 4; }
+.cmp-legend { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; }
+.cmp-legend .key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.cmp-legend .key.a { background: #94a3b8; }
+.cmp-legend .key.b { background: var(--brand, #6d28d9); }
+.cmp-legend .muted { margin-left: auto; }
+
+/* Deltas read at a glance: more money out is not the same as less. */
+.sheet td.num.up { color: #b91c1c; }
+.sheet td.num.down { color: #047857; }
+.sheet td.num.flat { color: var(--muted, #9ca3af); }
+.nav-sublink.cmp { font-style: italic; }

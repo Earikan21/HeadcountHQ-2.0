@@ -106,6 +106,143 @@
     if (left > 0) wrap.scrollLeft = left;
   })();
 
+  // ---- autosave (plan sheets only) -------------------------------------------
+  // The browser never prices anyone. It posts one cell, and the server replies with
+  // the recomputed row, department subtotal, grand total, KPIs and summary, already
+  // formatted. That keeps the sheet and the CSV export honest about the same numbers.
+  (function autosave() {
+    var csrfEl = document.getElementById("model-csrf");
+    var version = sheet.getAttribute("data-version");
+    if (sheet.getAttribute("data-editable") !== "1" || !csrfEl || !version) return;
+    var period = sheet.getAttribute("data-period") || "month";
+    var dept = sheet.getAttribute("data-dept") || "";
+    var pill = document.getElementById("save-pill");
+    var pillTimer = null;
+
+    function say(text, cls) {
+      if (!pill) return;
+      pill.textContent = text;
+      pill.className = "save-pill " + (cls || "");
+      pill.hidden = false;
+      if (pillTimer) clearTimeout(pillTimer);
+      if (cls !== "err") pillTimer = setTimeout(function () { pill.hidden = true; }, 1800);
+    }
+
+    function setSeries(tr, s) {
+      if (!tr || !s) return;
+      var cells = tr.querySelectorAll("td.mc:not(.ytot)");
+      for (var i = 0; i < cells.length && i < s.cells.length; i++) {
+        cells[i].textContent = s.cells[i].t;
+        cells[i].setAttribute("data-v", s.cells[i].v);
+      }
+      Object.keys(s.yearTotals || {}).forEach(function (y) {
+        var yt = tr.querySelector('td.ytot[data-year="' + y + '"]');
+        if (yt) { yt.textContent = s.yearTotals[y].t; yt.setAttribute("data-v", s.yearTotals[y].v); }
+      });
+    }
+
+    // Department names can contain anything; match by attribute value, not a selector.
+    function deptRow(name) {
+      var rows = body ? body.querySelectorAll("tr.grp[data-dept]") : [];
+      for (var i = 0; i < rows.length; i++) if (rows[i].getAttribute("data-dept") === name) return rows[i];
+      return null;
+    }
+
+    function patch(input, data) {
+      var tr = input.closest("tr");
+      var field = input.getAttribute("data-field");
+
+      if (data.row) {
+        setSeries(tr, data.row);
+        var loaded = tr.querySelector("td.loaded");
+        if (loaded) loaded.textContent = data.row.loaded;
+        tr.setAttribute("data-loaded", String(data.row.loaded).replace(/,/g, ""));
+      }
+      // keep the sort/filter attributes honest about what the row now says
+      if (field === "name") tr.setAttribute("data-name", (input.value || "").toLowerCase());
+      else if (field === "salary") tr.setAttribute("data-salary", input.value || "0");
+      else if (field === "start") tr.setAttribute("data-start", input.value || "");
+      else if (field === "end") { tr.setAttribute("data-end", input.value || ""); tr.classList.toggle("ends", !!input.value); }
+
+      // per-field override marks: a cell edited back to its roster value stops glowing
+      if (data.marks) {
+        ["name", "start", "end", "salary"].forEach(function (f) {
+          var td = tr.querySelector('td[data-cell="' + f + '"]');
+          if (td) td.classList.toggle("ovr", !!data.marks[f]);
+        });
+      }
+      var reset = tr.querySelector("form.row-reset"), clean = tr.querySelector(".row-clean");
+      if (reset) reset.hidden = !data.overridden;
+      if (clean) clean.hidden = !!data.overridden;
+
+      if (data.dept) setSeries(deptRow(data.dept.name), data.dept);
+      if (data.total) setSeries(body ? body.querySelector("tr.total-grp") : null, data.total);
+
+      if (data.kpis) Object.keys(data.kpis).forEach(function (k) {
+        var el = document.querySelector('.kpi[data-k="' + k + '"] .val');
+        if (el) el.textContent = data.kpis[k];
+      });
+
+      // The summary is keyed by year, so rows are matched by name rather than position.
+      if (data.summary) Object.keys(data.summary).forEach(function (year) {
+        var tr = document.querySelector('#annual-summary tbody tr[data-year="' + year + '"]');
+        if (!tr) return;
+        var tds = tr.querySelectorAll("td");
+        var vals = data.summary[year];
+        for (var j = 0; j < vals.length && j + 1 < tds.length; j++) tds[j + 1].textContent = vals[j];
+      });
+    }
+
+    function save(input) {
+      var b = new URLSearchParams();
+      b.set("_csrf", csrfEl.value);
+      b.set("key", input.getAttribute("data-key"));
+      b.set("field", input.getAttribute("data-field"));
+      b.set("value", input.value);
+      b.set("period", period);
+      if (dept) b.set("dept", dept);
+      say("Saving…", "");
+      fetch("/model/versions/" + version + "/cell", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: b.toString()
+      }).then(function (r) {
+        return r.json().catch(function () { return { ok: false, error: "Save failed." }; });
+      }).then(function (data) {
+        if (!data.ok) { input.classList.add("bad"); say(data.error || "Not saved.", "err"); return; }
+        input.classList.remove("bad");
+        // Moving a start date can widen the window, changing how many columns and years
+        // exist. The save landed; the page we're looking at is simply out of date.
+        if (data.windowKey && data.windowKey !== sheet.getAttribute("data-windowkey")) {
+          say("Saved — refreshing…", "ok");
+          window.location.reload();
+          return;
+        }
+        if (document.activeElement !== input) input.value = data.value; // snap to normalised
+        patch(input, data);
+        say("Saved", "ok");
+      }).catch(function () {
+        input.classList.add("bad");
+        say("Network error — not saved.", "err");
+      });
+    }
+
+    // "change" fires on blur / Enter / picker commit — one save per finished cell,
+    // not one per keystroke.
+    var timers = new WeakMap();
+    Array.prototype.forEach.call(sheet.querySelectorAll("input.cell-input"), function (input) {
+      var initial = input.value;
+      input.addEventListener("change", function () {
+        if (input.value === initial) return; // nothing actually changed
+        initial = input.value;
+        if (timers.get(input)) clearTimeout(timers.get(input));
+        timers.set(input, setTimeout(function () { save(input); }, 150));
+      });
+      // Enter should commit, not submit anything
+      input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
+    });
+  })();
+
   // ---- sort (within each department block) ----
   var dir = {};
   function cellVal(tr, key, type) { var v = tr.getAttribute("data-" + key); if (v == null) v = ""; return type === "num" ? (Number(v) || 0) : String(v).toLowerCase(); }

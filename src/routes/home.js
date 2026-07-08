@@ -26,7 +26,7 @@ export function registerHomeRoutes(router) {
       if (!rosterDone) {
         const cap = getCompanyBudget(ctx.db);
         const budgetDone = (cap.headcount || 0) > 0 || (cap.money || 0) > 0;
-        return ctx.html(200, welcomePage(ctx, { rosterDone, budgetDone }));
+        return ctx.html(200, welcomePage(ctx, { rosterDone }));
       }
     }
     // Company-wide viewers (AZ Finance + clients) get the reimagined overview.

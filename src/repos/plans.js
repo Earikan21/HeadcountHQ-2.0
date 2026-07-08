@@ -21,8 +21,46 @@ export function setPlanHires(db, id, hires) {
   db.prepare("UPDATE plan_versions SET hires_json = ? WHERE id = ?").run(JSON.stringify(hires || []), Number(id));
 }
 
+/**
+ * Copy a plan whole: its hires, its assumptions, and its per-employee overrides.
+ * The copy gets a free name ("Base case (copy)", then "(copy 2)", ...) so duplicating
+ * twice doesn't produce two identically-named plans in the sidebar.
+ */
+export function duplicatePlan(db, plan) {
+  const taken = new Set(listPlans(db).map((p) => p.name));
+  let name = `${plan.name} (copy)`;
+  for (let i = 2; taken.has(name); i++) name = `${plan.name} (copy ${i})`;
+  const info = db.prepare(
+    "INSERT INTO plan_versions (name, hires_json, assumptions_json, overrides_json) VALUES (?, ?, ?, ?)"
+  ).run(name.slice(0, 80), plan.hires_json || "[]", plan.assumptions_json || "{}", plan.overrides_json || "{}");
+  return getPlan(db, info.lastInsertRowid);
+}
+
 export const deletePlan = (db, id) =>
   db.prepare("DELETE FROM plan_versions WHERE id = ?").run(Number(id));
+
+/** A plan's sparse per-employee overrides: { [employee_ext_id]: {field: value} }. */
+export function planOverrides(plan) {
+  if (!plan) return {};
+  try {
+    const o = JSON.parse(plan.overrides_json || "{}");
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch { return {}; }
+}
+
+export function setPlanOverrides(db, id, obj) {
+  db.prepare("UPDATE plan_versions SET overrides_json = ? WHERE id = ?").run(JSON.stringify(obj || {}), Number(id));
+}
+
+/** The next free "hN" id for a plan's hires. */
+export function nextHireId(hires) {
+  let max = 0;
+  for (const h of hires || []) {
+    const m = /^h(\d+)$/.exec(String(h.id || ""));
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return "h" + (max + 1);
+}
 
 export function planAssumptions(plan) {
   if (!plan) return {};

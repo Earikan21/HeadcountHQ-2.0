@@ -123,6 +123,7 @@ export function peoplePage(ctx, { employees, roll, seats }) {
 
   const scopedNote = departmentScope(ctx.user) != null ? " You see your own department." : "";
   const body = html`
+    ${importedModal(ctx)}
     <div class="pagehead row-between">
       <div><h1>People</h1><p class="muted">Everyone on the roster and every seat, grouped by department.${exact ? "" : " Compensation is shown as bands."}${scopedNote}</p></div>
       ${isAdmin ? html`<div class="actions"><a class="btn" href="/roster/new">Add person</a> <a class="btn ghost" href="/roster/import">Import roster</a> <a class="btn ghost" href="/roster/export.csv">Export CSV</a></div>` : ""}
@@ -132,4 +133,24 @@ export function peoplePage(ctx, { employees, roll, seats }) {
     ${depts.length ? depts.map((d) => deptDropdown(ctx, d, { isAdmin, showTotals, exact }))
       : html`<div class="card"><p class="muted">No people yet.${isAdmin ? html` Start by <a href="/roster/import">importing your roster</a>.` : ""}</p></div>`}`;
   return renderPage(ctx, { title: "People", body, active: "roster" });
+}
+
+/**
+ * Shown straight after a roster import: the point of importing is the model, so say
+ * so and offer the door. Plain HTML/CSS — the strict CSP forbids inline script, and a
+ * dialog that needs JS to dismiss is a dialog that can trap someone.
+ */
+function importedModal(ctx) {
+  const n = Number(ctx.query.get("imported"));
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return html`<div class="modal-scrim">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="imported-h">
+      <h2 id="imported-h">Imported ${n} ${n === 1 ? "person" : "people"}</h2>
+      <p class="muted small">Your financial model is built and ready — headcount and fully-loaded cost, month by month, out to five years.</p>
+      <div class="modal-actions">
+        <a class="btn" href="/model">Open the financial model &rarr;</a>
+        <a class="btn ghost" href="/roster">Stay on People</a>
+      </div>
+    </section>
+  </div>`;
 }

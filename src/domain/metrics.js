@@ -30,6 +30,7 @@ export function computeMetrics({ employees = [], settings = {}, rollup = { total
     activeSeats: rollup.totals.active || 0, approvedSeats: rollup.totals.approved || 0, openSeats: rollup.totals.open || 0,
     totalBase, totalLoaded: Math.round(totalBase * mult), loadedMultiplier: mult,
     avgBase: allSals.length ? Math.round(totalBase / allSals.length) : 0,
+    avgLoadedPerHead: allSals.length ? Math.round((totalBase * mult) / allSals.length) : 0,
     medianBase: median(allSals), minBase: allSals[0] || 0, maxBase: allSals[allSals.length - 1] || 0,
     employmentTypes: byType, employmentStatus: byStatus,
   };
@@ -106,6 +107,11 @@ export function metricsText(m) {
   const status = Object.entries(c.employmentStatus).map(([k, v]) => `${v} ${k}`).join(", ") || "n/a";
   L.push(`Company: ${c.headcount} people (${c.activeSeats} active / ${c.approvedSeats} approved / ${c.openSeats} open seats). Types: ${types}. Status: ${status}.`);
   L.push(`Pay: base total ${money(c.totalBase)}, fully-loaded ${money(c.totalLoaded)} (x${c.loadedMultiplier}). Base salary avg ${money(c.avgBase)}, median ${money(c.medianBase)}, min ${money(c.minBase)}, max ${money(c.maxBase)}.`);
+  // Stated plainly, because "what's our average salary?" is the single most-asked question.
+  L.push(`AVERAGE SALARY (company-wide): ${money(c.avgBase)} base per person${c.avgLoadedPerHead ? `, ${money(c.avgLoadedPerHead)} fully loaded` : ""}, across ${c.headcount} people.`);
+  if (m.departments.length) {
+    L.push(`AVERAGE SALARY BY DEPARTMENT (base per person): ${m.departments.map((d) => `${d.department} ${money(d.avgBase)} (${d.headcount})`).join("; ")}.`);
+  }
   if (m.model) {
     L.push(`Model ${m.model.windowStart}–${m.model.windowEnd}: headcount now ${m.model.headcountNow}, in 12 mo ${m.model.headcountIn12mo} (net ${m.model.netNew12mo >= 0 ? "+" : ""}${m.model.netNew12mo}), annual run-rate ${money(m.model.annualRunRate)}${m.model.yoyCostGrowthPct != null ? `, YoY cost growth ${m.model.yoyCostGrowthPct}%` : ""}.`);
     L.push(`Fully-loaded cost by year: ${m.model.costByYear.map((y) => `${y.year} ${money(y.totalLoaded)} (${y.yearEndHeadcount} EOY, ${money(y.avgCostPerHead)}/head)`).join("; ")}.`);

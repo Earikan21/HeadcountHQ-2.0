@@ -61,14 +61,49 @@ export function deriveWindow(employees, now = new Date(), horizonMonths = 60) {
 export function scenarioEmployees(scenarioHires = []) {
   const out = [];
   for (const h of scenarioHires || []) {
+    // Post-migration a hire is exactly one person. `count` only survives for
+    // un-migrated JSON; those rows are anonymous, so they get no editable identity.
     const count = Math.max(1, Math.min(200, Number(h.count) || 1));
     const start = h.start_month ? (String(h.start_month).length === 7 ? h.start_month + "-01" : String(h.start_month)) : null;
     const end = h.end_month ? (String(h.end_month).length === 7 ? h.end_month + "-01" : String(h.end_month)) : null;
+    const role = h.role || "Scenario hire";
     for (let i = 0; i < count; i++) {
-      out.push({ name: h.role || "Scenario hire", job_title: h.role || "Scenario hire", department_name: h.department || "(scenario)", annual_salary: Number(h.annual_salary) || 0, start_date: start, end_date: end, employment_status: "active", _scenario: true });
+      out.push({
+        name: h.name || role, job_title: role, department_name: h.department || "(scenario)",
+        annual_salary: Number(h.annual_salary) || 0, start_date: start, end_date: end,
+        employment_status: "active", _scenario: true,
+        _hireId: count === 1 && h.id ? String(h.id) : null,
+      });
     }
   }
   return out;
+}
+
+/** The only employee fields a plan may override. Anything else is roster truth. */
+export const OVERRIDABLE_FIELDS = ["name", "start_date", "end_date", "annual_salary"];
+
+/**
+ * Layer a plan's sparse overrides onto the live roster, keyed by employee_ext_id.
+ *
+ * Pure: never mutates its input, and returns the original object when a person has
+ * no override (so the common path allocates nothing). A key that is present but null
+ * is a deliberate clear — "in this plan, this person never leaves" — which is why we
+ * test for presence rather than truthiness. Overrides for people no longer on the
+ * roster are simply ignored.
+ */
+export function applyPlanOverrides(employees = [], overrides = {}) {
+  const map = overrides && typeof overrides === "object" && !Array.isArray(overrides) ? overrides : {};
+  if (!Object.keys(map).length) return employees;
+  return employees.map((e) => {
+    const o = map[e.employee_ext_id];
+    if (!o || typeof o !== "object") return e;
+    const patch = {}, marks = {};
+    for (const f of OVERRIDABLE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(o, f)) { patch[f] = o[f] === "" ? null : o[f]; marks[f] = true; }
+    }
+    if (!Object.keys(patch).length) return e;
+    return { ...e, ...patch, _overridden: marks };
+  });
 }
 
 /** Resolve effective drivers for a department: per-department override, else the
@@ -124,6 +159,7 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
       annualBase: annual, monthlyBase, monthlyBenefits, loadedMonthly,
       hireMonthLabel: hireIdx > 0 && hireIdx < months ? cols[hireIdx].fullLabel : (hireIdx <= 0 ? "From start" : "After window"),
       id: e.id != null ? e.id : null, extId: e.employee_ext_id || "",
+      hireId: e._hireId || null, overridden: e._overridden || null,
       startDate: e.start_date || "", endDate: e.end_date || "", scenario: !!e._scenario, active, monthlyCost,
     };
   });
@@ -153,6 +189,54 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
   });
 
   return { cols, roster, departments, deptMonthlyCost, totalMonthlyCost, monthlyHeadcount, benefitsPct, mult: globalMult, years, months, start };
+}
+
+/**
+ * Group the display buckets by calendar year, keeping their positions. Lives here
+ * (not in the view) because the autosave endpoint recomputes the same cells.
+ */
+export function yearGroupsOf(cols, buckets) {
+  const groups = [];
+  buckets.forEach((b, i) => {
+    const yr = cols[b.idxs[0]].year;
+    let g = groups[groups.length - 1];
+    if (!g || g.year !== yr) { g = { year: yr, pos: [] }; groups.push(g); }
+    g.pos.push(i);
+  });
+  return groups;
+}
+
+/**
+ * The mini-dashboard's raw numbers. Returned unformatted so the view and the
+ * autosave endpoint format them identically from one source of truth.
+ */
+export function modelKpis(model, now = new Date()) {
+  const { cols, totalMonthlyCost, monthlyHeadcount, departments } = model;
+  let nowIdx = cols.findIndex((c) => c.year === now.getFullYear() && c.month0 === now.getMonth());
+  if (nowIdx < 0) nowIdx = Math.max(0, cols.length - 1);
+  const nowLabel = cols.length ? cols[nowIdx].fullLabel : "";
+  const curHc = monthlyHeadcount[nowIdx] || 0;
+  const thisYear = cols.length ? cols[nowIdx].year : now.getFullYear();
+  const thisYearCost = cols.reduce((a, c, i) => a + (c.year === thisYear ? totalMonthlyCost[i] : 0), 0);
+  const endI = Math.min(nowIdx + 11, cols.length - 1);
+  const next12Cost = totalMonthlyCost.slice(nowIdx, endI + 1).reduce((a, b) => a + b, 0);
+  const hc12 = monthlyHeadcount[Math.min(nowIdx + 12, cols.length - 1)] || 0;
+  return {
+    nowIdx, nowLabel, curHc, thisYear, thisYearCost, next12Cost,
+    netNew: hc12 - curHc,
+    avgHead: curHc ? Math.round((totalMonthlyCost[nowIdx] || 0) / curHc) : 0,
+    deptCount: departments.length,
+  };
+}
+
+/**
+ * A fingerprint of the grid a page rendered. Editing a start date can move the window
+ * (and so the number of columns and years); an autosave patch that assumed otherwise
+ * would silently write numbers into the wrong cells. The client compares this against
+ * what it rendered and reloads on a mismatch.
+ */
+export function windowKey(model, period = "month") {
+  return `${model.start.year}-${model.start.month0}-${model.months}-${period}`;
 }
 
 /** Group month columns into display periods (item 9): month | quarter | year. */
