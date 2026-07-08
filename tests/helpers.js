@@ -12,6 +12,9 @@ export async function startTestServer(envOverrides = {}) {
     SESSION_SECRET: "test-secret-0123456789abcdef",
     DATABASE_PATH: ":memory:",
     COOKIE_SECURE: "false",
+    // 2FA is required in production, but forcing enrollment would break every login-
+    // based test; suites that exercise 2FA pass MFA_ENFORCED:"true" explicitly.
+    MFA_ENFORCED: "false",
     // The Directive-4.0 feature flags default OFF in production (internal tool), but
     // the retained code lives behind them. Tests exercise that retained code, so the
     // harness enables every area by default; a test can pass FEATURE_*="false" in

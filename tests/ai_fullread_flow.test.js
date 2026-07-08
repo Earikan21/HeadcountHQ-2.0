@@ -55,17 +55,12 @@ test("philosophy exposes the full-read toggle behind a warning", async () => {
 
 test("full read: messy file -> normalized table -> review -> commit", async () => {
   const c = await login();
+  // Full read is on by default and the file is messy, so upload goes straight to
+  // review — no opt-in card, no manual click.
   const up = await c.upload("/roster/import", {}, { field: "file", filename: "messy.csv", content: MESSY });
-  const id = up.headers.get("location").match(/\/roster\/import\/(\d+)\/map/)[1];
-
-  // the map page should offer the full-read option
-  const mapPage = await (await c.get(`/roster/import/${id}/map`)).text();
-  assert.match(mapPage, /AI full read/);
-
-  // run full read
-  const fr = await c.post(`/roster/import/${id}/fullread`, {});
-  assert.equal(fr.status, 303);
-  assert.match(fr.headers.get("location"), /review\?fr=ok/);
+  assert.equal(up.status, 303);
+  assert.match(up.headers.get("location"), /\/roster\/import\/\d+\/review\?fr=ok/, "auto full-read on upload");
+  const id = up.headers.get("location").match(/\/roster\/import\/(\d+)\/review/)[1];
 
   // the batch matrix was replaced with a clean normalized table
   const mapping = JSON.parse(srv.db.prepare("SELECT mapping FROM import_batches WHERE id=?").get(Number(id)).mapping);
@@ -93,6 +88,7 @@ test("full-read route is inert when the toggle is off", async () => {
   const c = await login();
   await c.post("/philosophy", { ai_import_enabled: "on", ai_provider: "anthropic" }); // full read OFF
   const up = await c.upload("/roster/import", {}, { field: "file", filename: "m.csv", content: MESSY });
+  assert.match(up.headers.get("location"), /\/roster\/import\/\d+\/map/, "no auto full-read when the toggle is off");
   const id = up.headers.get("location").match(/\/roster\/import\/(\d+)\/map/)[1];
   const fr = await c.post(`/roster/import/${id}/fullread`, {});
   assert.equal(fr.status, 303);

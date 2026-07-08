@@ -18,7 +18,7 @@ test("create a named plan, add a hire, and see it layered on the model", async (
   let page = await (await admin.get("/model?version=" + id)).text();
   assert.ok(!/class="version-bar"/.test(page), "the old top plan bar is gone");
   assert.match(page, /class="nav-sublink on"[^>]*>Board plan|Board plan/);
-  assert.match(page, /Plan: <b>Board plan<\/b>/);
+  assert.match(page, /name="name" value="Board plan"/);
   await admin.post(`/model/versions/${id}/hire`, { scn_department: "Sales", scn_role: "AE", scn_start: "2027-06", scn_salary: "120000", scn_count: "2" });
   page = await (await admin.get("/model?version=" + id)).text();
   assert.match(page, /class="prow scn"/);
@@ -28,6 +28,47 @@ test("create a named plan, add a hire, and see it layered on the model", async (
   const plan = srv.db.prepare("SELECT hires_json FROM plan_versions WHERE id=?").get(Number(id));
   assert.match(plan.hires_json, /"department":"Sales"/);
   assert.deepEqual(JSON.parse(plan.hires_json).map((h) => h.id), ["h1", "h2"]);
+});
+
+test("a plan can be renamed after creation, and the new name shows everywhere", async () => {
+  const created = await admin.post("/model/versions", { name: "Draft" });
+  const id = created.headers.get("location").match(/version=(\d+)/)[1];
+
+  // the plan bar offers an inline rename field
+  let page = await (await admin.get("/model?version=" + id)).text();
+  assert.match(page, new RegExp(`action="/model/versions/${id}/rename"`));
+  assert.match(page, /name="name" value="Draft"/);
+
+  const res = await admin.post(`/model/versions/${id}/rename`, { name: "  VC   pitch  " });
+  assert.equal(res.status, 303);
+  // trimmed + single-spaced + capped by the shared cleaner
+  assert.equal(srv.db.prepare("SELECT name FROM plan_versions WHERE id=?").get(Number(id)).name, "VC pitch");
+
+  page = await (await admin.get("/model?version=" + id)).text();
+  assert.match(page, /name="name" value="VC pitch"/, "the plan bar shows the new name");
+  // and so does the left-nav sub-tab
+  assert.match(page, /class="nav-sublink[^"]*"[^>]*>VC pitch/);
+});
+
+test("renaming to blank keeps a usable name rather than an empty one", async () => {
+  const created = await admin.post("/model/versions", { name: "Temp" });
+  const id = created.headers.get("location").match(/version=(\d+)/)[1];
+  await admin.post(`/model/versions/${id}/rename`, { name: "   " });
+  assert.equal(srv.db.prepare("SELECT name FROM plan_versions WHERE id=?").get(Number(id)).name, "New plan");
+});
+
+test("a client cannot rename a plan", async () => {
+  const created = await admin.post("/model/versions", { name: "Locked" });
+  const id = created.headers.get("location").match(/version=(\d+)/)[1];
+  const email = `cli${Math.random().toString(16).slice(2, 6)}@x.co`;
+  const mk = await admin.post("/accounts", { name: "Cli", email, role: "client", method: "password" });
+  const pw = (await mk.text()).match(/<code>([^<]+)<\/code>/)[1];
+  const client = makeClient(srv.base);
+  await client.get("/login");
+  await client.post("/login", { email, password: pw });
+  const res = await client.post(`/model/versions/${id}/rename`, { name: "hacked" });
+  assert.equal(res.status, 403);
+  assert.equal(srv.db.prepare("SELECT name FROM plan_versions WHERE id=?").get(Number(id)).name, "Locked");
 });
 
 test("Actual view has no scenario rows; deleting a plan removes it", async () => {
