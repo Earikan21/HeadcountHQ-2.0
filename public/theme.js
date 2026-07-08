@@ -8,8 +8,8 @@
 
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}
-  var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  apply(saved || (prefersDark ? "dark" : "light"));
+  // Default to light; only honour an explicit choice the user has made here.
+  apply(saved === "dark" ? "dark" : "light");
 
   document.addEventListener("DOMContentLoaded", function () {
     var btn = document.getElementById("theme-toggle");

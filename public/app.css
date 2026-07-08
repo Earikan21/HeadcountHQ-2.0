@@ -623,3 +623,52 @@ b.ok{color:var(--green)} b.off{color:#b91c1c}
   background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
 .theme-toggle.on .tt-track{background:var(--brand);border-color:var(--brand)}
 .theme-toggle.on .tt-thumb{transform:translateX(15px)}
+
+/* ============================================================================
+   Identity refresh — trade the generic indigo/purple SaaS palette for a
+   restrained, near-monochrome finance look: a single serious green accent,
+   crisper corners, borders over shadows, tabular figures. Styling only.
+   (This block is intentionally last so it wins; the dark overrides below it
+   re-assert the dark accent under [data-theme="dark"].)
+   ============================================================================ */
+:root{
+  /* One considered accent — a deep evergreen — instead of AI-template violet. */
+  --brand:#0f7355; --brand-2:#0b5a42; --brand-soft:#e9f2ee; --brand-ink:#0b5540;
+  /* Cooler, more confident ink + hairlines. */
+  --ink:#141a24; --ink-2:#3b4658; --muted:#68727f;
+  --line:#e4e7ec; --line-2:#eff1f5;
+  /* Tighter, more precise corners than the friendly 12px bubble. */
+  --radius:9px; --radius-sm:6px;
+  /* Lean on borders; keep shadows a whisper. */
+  --shadow:0 1px 1px rgba(20,26,36,.03), 0 1px 2px rgba(20,26,36,.04);
+  --shadow-md:0 6px 22px rgba(20,26,36,.09);
+}
+[data-theme="dark"]{
+  --brand:#2fb488; --brand-2:#26a37a; --brand-soft:#12312690; --brand-ink:#7fe3c0;
+}
+
+/* A solid, serious brand mark rather than a purple gradient chip. */
+.logo{background:var(--brand);border-radius:7px}
+
+/* Active nav: a quiet neutral fill with a thin accent spine — reads considered,
+   not "highlighted pill". */
+.nav-link.on{background:var(--surface-2);color:var(--ink);box-shadow:inset 2px 0 0 var(--brand)}
+.nav-sublink.on{background:var(--surface-2);color:var(--ink)}
+
+/* Financial figures line up like a ledger. */
+.kpi .val, .sheet td.num, .sheet th.num, .table .right, .mono{
+  font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1;
+}
+
+/* Slightly tighter display headings; the small-caps section labels read premium. */
+h1{letter-spacing:-.02em}
+h2{letter-spacing:-.011em}
+.pagehead h1{font-weight:680}
+
+/* Buttons: flatten the hover (no brightness pop — a subtle darken reads higher-end). */
+.btn:hover{filter:none;background:var(--brand-2);border-color:var(--brand-2)}
+.btn.ghost:hover{background:var(--surface-2)}
+
+/* Cards/inputs pick up the tighter radius automatically via the vars above; nudge
+   the sidebar hairline to feel crisper. */
+.sidebar{border-right-color:var(--line)}
