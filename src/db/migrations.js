@@ -614,4 +614,16 @@ export const MIGRATIONS = [
       }
     },
   },
+  {
+    name: "2026_07_08_027_two_factor_auth",
+    up(db) {
+      // Two-factor auth (TOTP). The secret is base32; recovery codes are stored as
+      // SHA-256 hashes (a leaked DB reveals no usable code). `mfa_pending` marks a
+      // session that has passed the password but not yet the second factor.
+      db.exec(`ALTER TABLE users ADD COLUMN totp_secret TEXT;`);
+      db.exec(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;`);
+      db.exec(`ALTER TABLE users ADD COLUMN totp_recovery_json TEXT NOT NULL DEFAULT '[]';`);
+      db.exec(`ALTER TABLE sessions ADD COLUMN mfa_pending INTEGER NOT NULL DEFAULT 0;`);
+    },
+  },
 ];

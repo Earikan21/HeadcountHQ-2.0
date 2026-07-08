@@ -53,6 +53,10 @@ export function loadConfig(env = process.env) {
   const DATABASE_PATH = env.DATABASE_PATH || "./data/headcount.sqlite";
   const SESSION_SECRET = env.SESSION_SECRET || "";
   const COOKIE_SECURE = toBool(env.COOKIE_SECURE, false);
+  // Two-factor auth is required for everyone by default. MFA_ENFORCED=false is an
+  // escape hatch (emergency access recovery, and the test harness) — never set it in
+  // normal production.
+  const mfaEnforced = toBool(env.MFA_ENFORCED, true);
 
   const SMTP_HOST = (env.SMTP_HOST || "").trim();
   const SMTP_PORT = toInt(env.SMTP_PORT, 587, "SMTP_PORT", errors);
@@ -91,6 +95,7 @@ export function loadConfig(env = process.env) {
     DATABASE_PATH,
     SESSION_SECRET,
     COOKIE_SECURE,
+    mfaEnforced,
     SMTP_HOST,
     SMTP_PORT,
     SMTP_USER,

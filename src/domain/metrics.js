@@ -12,6 +12,41 @@ const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
 const median = (sorted) => (sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0);
 const round1 = (x) => Math.round(x * 10) / 10;
 
+/**
+ * Per-department (and company-wide) base-pay statistics, straight from the roster.
+ *
+ * This is the source of truth for questions like "pay them the department average":
+ * the arithmetic lives here, in code, precisely because a language model cannot be
+ * trusted to average three numbers reliably. Salaries are annual, matching how the
+ * rest of the model stores and reasons about pay.
+ */
+export function departmentPayStats(employees = []) {
+  const byDept = new Map();
+  const all = [];
+  for (const e of employees) {
+    const salary = Number(e.annual_salary) || 0;
+    if (salary <= 0) continue;
+    const d = e.department_name || "(none)";
+    if (!byDept.has(d)) byDept.set(d, []);
+    byDept.get(d).push(salary);
+    all.push(salary);
+  }
+  const of = (sals) => {
+    const sorted = sals.slice().sort((a, b) => a - b);
+    return {
+      count: sorted.length,
+      avg: sorted.length ? Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length) : 0,
+      median: median(sorted),
+      min: sorted[0] || 0,
+      max: sorted[sorted.length - 1] || 0,
+    };
+  };
+  return {
+    departments: [...byDept.entries()].map(([name, sals]) => ({ name, ...of(sals) })),
+    company: of(all),
+  };
+}
+
 export function computeMetrics({ employees = [], settings = {}, rollup = { totals: {}, departments: [] }, reconciliation = null, financials = null, now = new Date() } = {}) {
   const mult = Number(settings.loaded_cost_multiplier) || 1.2;
   const nowMs = now.getTime();

@@ -6,10 +6,20 @@ export const listPlans = (db) =>
 export const getPlan = (db, id) =>
   db.prepare("SELECT * FROM plan_versions WHERE id = ?").get(Number(id));
 
+/** The one place a plan name is cleaned: trimmed, single-spaced, capped, never empty. */
+export function cleanPlanName(name) {
+  return String(name || "").trim().replace(/\s+/g, " ").slice(0, 80) || "New plan";
+}
+
 export function createPlan(db, name) {
-  const info = db.prepare("INSERT INTO plan_versions (name, hires_json) VALUES (?, '[]')")
-    .run(String(name || "New plan").trim().slice(0, 80) || "New plan");
+  const info = db.prepare("INSERT INTO plan_versions (name, hires_json) VALUES (?, '[]')").run(cleanPlanName(name));
   return getPlan(db, info.lastInsertRowid);
+}
+
+export function renamePlan(db, id, name) {
+  const clean = cleanPlanName(name);
+  db.prepare("UPDATE plan_versions SET name = ? WHERE id = ?").run(clean, Number(id));
+  return clean;
 }
 
 export function planHires(plan) {

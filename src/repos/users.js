@@ -1,3 +1,4 @@
+import { hashRecoveryCode, generateRecoveryCodes } from "../domain/totp.js";
 import { hashPassword } from "../auth/passwords.js";
 import { addDepartmentForUser } from "./collaborators.js";
 
@@ -51,3 +52,47 @@ export const setUserStatus = (db, userId, status) =>
 
 export const touchLogin = (db, userId) =>
   db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(userId);
+
+// ---- two-factor (TOTP) -----------------------------------------------------
+
+/** Stash a not-yet-confirmed secret (enrollment step 1). Does not enable 2FA. */
+export function setTotpSecret(db, userId, secret) {
+  db.prepare("UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?").run(secret, userId);
+}
+
+/** Turn 2FA on and store freshly-generated recovery-code hashes. */
+export function enableTotp(db, userId, recoveryHashes = []) {
+  db.prepare("UPDATE users SET totp_enabled = 1, totp_recovery_json = ? WHERE id = ?")
+    .run(JSON.stringify(recoveryHashes), userId);
+}
+
+/** Wipe 2FA entirely (admin reset for a lost device, or self re-enroll). */
+export function resetTotp(db, userId) {
+  db.prepare("UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_recovery_json = '[]' WHERE id = ?").run(userId);
+}
+
+/** Replace the recovery codes; returns the plaintext set to show once. */
+export function regenerateRecoveryCodes(db, userId) {
+  const { codes, hashes } = generateRecoveryCodes();
+  db.prepare("UPDATE users SET totp_recovery_json = ? WHERE id = ?").run(JSON.stringify(hashes), userId);
+  return codes;
+}
+
+/** Spend a recovery code: true if it matched (and is now consumed), false otherwise. */
+export function consumeRecoveryCode(db, userId, code) {
+  const user = getUserById(db, userId);
+  if (!user) return false;
+  let hashes;
+  try { hashes = JSON.parse(user.totp_recovery_json || "[]"); } catch { hashes = []; }
+  const target = hashRecoveryCode(code);
+  const idx = hashes.indexOf(target);
+  if (idx === -1) return false;
+  hashes.splice(idx, 1); // one-time use
+  db.prepare("UPDATE users SET totp_recovery_json = ? WHERE id = ?").run(JSON.stringify(hashes), userId);
+  return true;
+}
+
+export function recoveryCodesRemaining(db, userId) {
+  const user = getUserById(db, userId);
+  try { return JSON.parse(user.totp_recovery_json || "[]").length; } catch { return 0; }
+}

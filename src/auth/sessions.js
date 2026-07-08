@@ -10,16 +10,22 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
 /** Create a session; returns the raw cookie token + csrf token. */
-export function createSession(db, userId, { ip = "", userAgent = "" } = {}) {
+export function createSession(db, userId, { ip = "", userAgent = "", mfaPending = false } = {}) {
   const token = randomBytes(32).toString("hex");
   const csrf = randomBytes(32).toString("hex");
   const id = sha256(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   db.prepare(
-    `INSERT INTO sessions (id, user_id, csrf_token, expires_at, ip, user_agent)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, userId, csrf, expiresAt, ip, userAgent);
+    `INSERT INTO sessions (id, user_id, csrf_token, expires_at, ip, user_agent, mfa_pending)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, userId, csrf, expiresAt, ip, userAgent, mfaPending ? 1 : 0);
   return { token, csrf, expiresAt };
+}
+
+/** Mark a session as having cleared the second factor. */
+export function markSessionMfaPassed(db, token) {
+  if (!token) return;
+  db.prepare("UPDATE sessions SET mfa_pending = 0 WHERE id = ?").run(sha256(token));
 }
 
 /** Resolve a cookie token to { session, user } or null if missing/expired. */

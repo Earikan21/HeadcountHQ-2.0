@@ -9,8 +9,8 @@ import { tooManyAttempts, clearAttempts } from "../auth/ratelimit.js";
 import { clientIp } from "../middleware.js";
 import { SESSION_COOKIE } from "../constants.js";
 
-const startSession = (ctx, user) => {
-  const { token } = createSession(ctx.db, user.id, { ip: clientIp(ctx.req), userAgent: ctx.req.headers["user-agent"] || "" });
+const startSession = (ctx, user, { mfaPending = false } = {}) => {
+  const { token } = createSession(ctx.db, user.id, { ip: clientIp(ctx.req), userAgent: ctx.req.headers["user-agent"] || "", mfaPending });
   ctx.setCookie(SESSION_COOKIE, token);
 };
 
@@ -57,6 +57,12 @@ export function registerAuthRoutes(router) {
     clearAttempts(key);
     touchLogin(ctx.db, user.id);
     logAudit(ctx.db, { userId: user.id, action: "login.success", entity: "user", entityId: user.id });
+    // If 2FA is on, the session starts pending and the gate holds it at /login/2fa
+    // until the code clears it. Password alone is never a full session.
+    if (user.totp_enabled) {
+      startSession(ctx, user, { mfaPending: true });
+      return ctx.redirect("/login/2fa");
+    }
     startSession(ctx, user);
     ctx.redirect(user.must_change_password ? "/account?msg=Please+set+a+new+password" : "/");
   });

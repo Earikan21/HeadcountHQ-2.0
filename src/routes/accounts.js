@@ -4,7 +4,7 @@ import { requireAuth, requirePermission } from "../middleware.js";
 import { canManageAccounts, ROLES, ROLE_LABELS, displayRole } from "../authz.js";
 import {
   listUsers, getUserById, getUserByEmail, createUserWithPassword, createPendingUser,
-  setUserStatus, setPassword,
+  setUserStatus, setPassword, resetTotp, recoveryCodesRemaining,
 } from "../repos/users.js";
 import { listDepartments } from "../repos/departments.js";
 import { departmentsForUser, departmentIdsForUser, setDepartmentsForUser } from "../repos/collaborators.js";
@@ -75,6 +75,18 @@ export function registerAccountRoutes(router) {
     if (next === "disabled") destroyAllForUser(ctx.db, id);
     logAudit(ctx.db, { userId: ctx.user.id, action: "account.status", entity: "user", entityId: id, detail: { status: next } });
     ctx.redirect("/accounts?msg=Account+updated");
+  });
+
+  // Reset a collaborator's 2FA (lost device). They must re-enroll on next sign-in.
+  router.post("/accounts/:id/2fa/reset", (ctx) => {
+    if (!requirePermission(ctx, canManageAccounts)) return;
+    const id = Number(ctx.params.id);
+    const target = getUserById(ctx.db, id);
+    if (!target) return ctx.redirect("/accounts");
+    resetTotp(ctx.db, id);
+    destroyAllForUser(ctx.db, id); // force a fresh, re-enrolling login
+    logAudit(ctx.db, { userId: ctx.user.id, action: "2fa.reset_by_admin", entity: "user", entityId: id });
+    ctx.redirect("/accounts?msg=Two-factor+reset+for+" + encodeURIComponent(target.name));
   });
 
   router.post("/accounts/:id/invite", (ctx) => {
@@ -178,7 +190,10 @@ function accountsPage(ctx, { errors, banner, form = {} }) {
           </form>
           <form method="post" action="/accounts/${u.id}/invite" class="inline">
             ${csrfField(ctx)}<button class="btn sm ghost" type="submit">Invite link</button>
-          </form>`}
+          </form>
+          ${u.totp_enabled ? html`<form method="post" action="/accounts/${u.id}/2fa/reset" class="inline">
+            ${csrfField(ctx)}<button class="btn sm ghost" type="submit" title="Clear their 2FA so they can re-enroll (use if they lost their phone)">Reset 2FA</button>
+          </form>` : ""}`}
         ${u.role !== "finance_admin" ? manageBlock(u) : ""}
       </td>
     </tr>`;
@@ -237,6 +252,25 @@ function settingsPage(ctx, { errors }) {
         <label>New password <span class="hint">at least 10 characters</span><input name="password" type="password" autocomplete="new-password" required></label>
         <button class="btn" type="submit">Update password</button>
       </form>
-    </section>`;
+    </section>
+    ${twoFactorSection(ctx)}`;
   return renderPage(ctx, { title: "Account", body });
+}
+
+/** The signed-in user's own 2FA status + management links. */
+function twoFactorSection(ctx) {
+  const me = getUserById(ctx.db, ctx.user.id);
+  if (me.totp_enabled) {
+    const left = recoveryCodesRemaining(ctx.db, me.id);
+    return html`<section class="card narrow">
+      <h2>Two-factor authentication <span class="pill ok2">On</span></h2>
+      <p class="muted small">A code from your authenticator is required at sign-in. You have <b>${left}</b> unused recovery code${left === 1 ? "" : "s"}.</p>
+      <a class="btn ghost sm" href="/account/2fa/recovery">Manage recovery codes</a>
+    </section>`;
+  }
+  return html`<section class="card narrow">
+    <h2>Two-factor authentication <span class="pill off">Off</span></h2>
+    <p class="muted small">Protect your account with a second step at sign-in, using an app like Google Authenticator.</p>
+    <a class="btn sm" href="/account/2fa/setup">Set up two-factor</a>
+  </section>`;
 }

@@ -45,7 +45,13 @@ function planBar(ctx, extra) {
   const horizon = Math.max(1, Math.min(10, Number((extra.assumptions || {}).horizonYears) || 5));
   const yrs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   return html`<div class="plan-bar">
-    <span class="pb-name">Plan: <b>${cur.name}</b></span>
+    <form method="post" action="/model/versions/${cur.id}/rename" class="pb-rename">
+      ${csrfField(ctx)}
+      ${extra.dept ? html`<input type="hidden" name="dept" value="${extra.dept}">` : ""}
+      ${extra.period ? html`<input type="hidden" name="period" value="${extra.period}">` : ""}
+      <label class="pb-name">Plan <input name="name" value="${cur.name}" maxlength="80" aria-label="Plan name" title="Rename this plan"></label>
+      <button class="btn sm ghost" type="submit">Rename</button>
+    </form>
     <form method="post" action="/model/versions/${cur.id}/horizon" class="pb-horizon">
       ${csrfField(ctx)}
       ${extra.dept ? html`<input type="hidden" name="dept" value="${extra.dept}">` : ""}

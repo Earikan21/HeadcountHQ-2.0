@@ -82,6 +82,21 @@
     });
   });
 
+  // ---- rename a plan: submit on Enter or blur, so there's no stray "Rename" step ----
+  (function planRename() {
+    var form = document.querySelector("form.pb-rename");
+    if (!form) return;
+    var input = form.querySelector('input[name="name"]');
+    if (!input) return;
+    var last = input.value;
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
+    input.addEventListener("blur", function () {
+      var v = input.value.trim();
+      if (!v || v === last) { input.value = last; return; } // empty or unchanged: no submit
+      form.submit();
+    });
+  })();
+
   // ---- destructive actions ask first ----
   Array.prototype.forEach.call(document.querySelectorAll("form.confirm-delete"), function (f) {
     f.addEventListener("submit", function (ev) {

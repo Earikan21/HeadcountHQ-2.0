@@ -100,31 +100,73 @@ export async function answerQuestion({ question, context, client }) {
  * Parse a plain-English hiring what-if into structured scenario hires.
  * @returns {Promise<Array<{department:string,role:string,start_month:string|null,annual_salary:number,count:number}>>}
  */
-export async function parseScenarioHires({ description, departments = [], client }) {
+/** A salary basis the model may cite instead of a number; the server does the math. */
+const SALARY_BASES = ["dept_avg", "dept_median", "dept_min", "dept_max", "company_avg", "company_median"];
+
+/** Resolve a cited basis (e.g. "dept_avg") to a real figure from the roster stats. */
+function resolveSalaryBasis(basis, deptName, payStats) {
+  if (!basis || !payStats) return 0;
+  const dept = (payStats.departments || []).find((d) => String(d.name).toLowerCase() === String(deptName).toLowerCase());
+  const company = payStats.company || {};
+  switch (String(basis).toLowerCase()) {
+    case "dept_avg": return (dept && dept.avg) || company.avg || 0;      // fall back to company if the dept is new/empty
+    case "dept_median": return (dept && dept.median) || company.median || 0;
+    case "dept_min": return (dept && dept.min) || 0;
+    case "dept_max": return (dept && dept.max) || 0;
+    case "company_avg": return company.avg || 0;
+    case "company_median": return company.median || 0;
+    default: return 0;
+  }
+}
+
+/**
+ * Turn a plain-English hiring what-if into structured hires.
+ *
+ * `payStats` (from departmentPayStats) is the key to "pay them the department
+ * average": rather than trust the model to average salaries — which it does badly — we
+ * let it cite a `salary_basis` and resolve the actual number here, in code. An explicit
+ * number in the text is still honoured; the basis only fills the salary when the user
+ * asked for a statistic.
+ */
+export async function parseScenarioHires({ description, departments = [], payStats = null, client }) {
   if (!client || !client.configured) throw new Error("Assistant not configured.");
+  const statLine = payStats && payStats.departments && payStats.departments.length
+    ? "Department pay (annual base, from the roster): " +
+      payStats.departments.map((d) => `${d.name} avg ${d.avg}, median ${d.median}, range ${d.min}-${d.max} (n=${d.count})`).join("; ") +
+      `. Company avg ${payStats.company.avg}, median ${payStats.company.median}.`
+    : "Department pay figures are unavailable.";
   const system =
     "You convert a hiring what-if described in plain English into structured hires. " +
     "Respond with a SINGLE JSON object of the form " +
-    '{"hires":[{"department":"","role":"","start_month":"YYYY-MM","annual_salary":0,"count":1}]} ' +
+    '{"hires":[{"department":"","role":"","start_month":"YYYY-MM","annual_salary":0,"salary_basis":null,"count":1}]} ' +
     "and nothing else (no prose, no markdown).";
   const user =
 `Known departments: ${departments.join(", ") || "(none)"}
+${statLine}
 
 Turn this into hires: ${str(description, 500)}
 
 Rules:
 - start_month must be "YYYY-MM" (or null if unspecified).
-- annual_salary is a plain number (no $ or commas).
 - count is an integer (default 1).
-- Prefer an existing department name when the text clearly matches one.`;
+- Prefer an existing department name when the text clearly matches one.
+- Salary: if the text gives an explicit amount, put that plain number (no $ or commas) in "annual_salary" and leave "salary_basis" null. Salaries are ANNUAL — multiply a monthly figure by 12.
+- If instead the pay should follow a department or company statistic (e.g. "the department average", "median pay", "top of the band"), set "annual_salary" to 0 and set "salary_basis" to exactly one of: ${SALARY_BASES.join(", ")}. Do NOT try to compute the number yourself — the system fills it from the figures above.`;
   const text = await client.chat(system, user, 2000);
   const obj = parseJsonObject(text);
   const hires = Array.isArray(obj.hires) ? obj.hires : [];
-  return hires.map((h) => ({
-    department: String(h.department || "").slice(0, 60).trim() || "(scenario)",
-    role: String(h.role || "Scenario hire").slice(0, 60).trim(),
-    start_month: /^\d{4}-\d{2}$/.test(String(h.start_month || "")) ? h.start_month : null,
-    annual_salary: Number(h.annual_salary) || 0,
-    count: Math.max(1, Math.min(200, Number(h.count) || 1)),
-  })).filter((h) => h.annual_salary > 0);
+  return hires.map((h) => {
+    const department = String(h.department || "").slice(0, 60).trim() || "(scenario)";
+    const basis = SALARY_BASES.includes(String(h.salary_basis || "").toLowerCase()) ? String(h.salary_basis).toLowerCase() : null;
+    const explicit = Number(h.annual_salary) || 0;
+    // An explicit number wins; a cited basis is resolved from the real roster stats.
+    const annual_salary = explicit > 0 ? explicit : (basis ? resolveSalaryBasis(basis, department, payStats) : 0);
+    return {
+      department,
+      role: String(h.role || "Scenario hire").slice(0, 60).trim(),
+      start_month: /^\d{4}-\d{2}$/.test(String(h.start_month || "")) ? h.start_month : null,
+      annual_salary: Math.round(annual_salary),
+      count: Math.max(1, Math.min(200, Number(h.count) || 1)),
+    };
+  }).filter((h) => h.annual_salary > 0);
 }

@@ -15,8 +15,9 @@ import { alignedWindow, comparePlans } from "../domain/compare.js";
 import { comparePage } from "../views/compare.js";
 import { listEmployees } from "../repos/roster.js";
 import { clientFromConfig, parseScenarioHires } from "../domain/assistant.js";
+import { departmentPayStats } from "../domain/metrics.js";
 import { logAudit } from "../repos/audit.js";
-import { listPlans, getPlan, createPlan, duplicatePlan, planHires, setPlanHires, deletePlan, planAssumptions, setPlanAssumptions, planOverrides, setPlanOverrides, nextHireId } from "../repos/plans.js";
+import { listPlans, getPlan, createPlan, duplicatePlan, renamePlan, planHires, setPlanHires, deletePlan, planAssumptions, setPlanAssumptions, planOverrides, setPlanOverrides, nextHireId } from "../repos/plans.js";
 import { parseCellEdit, applyCellEdit } from "../domain/plan_edit.js";
 
 /** Money a department's headcount budget implies: current cost + midpoint of the
@@ -141,6 +142,16 @@ export function registerBudgetRoutes(router) {
     const plan = createPlan(ctx.db, ctx.body.name || "New plan");
     logAudit(ctx.db, { userId: ctx.user.id, action: "plan.created", entity: "plan_version", entityId: plan.id, detail: { name: plan.name } });
     ctx.redirect(`/model?version=${plan.id}`);
+  });
+
+  // Rename a plan.
+  router.post("/model/versions/:id/rename", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const clean = renamePlan(ctx.db, plan.id, ctx.body.name);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "plan.renamed", entity: "plan_version", entityId: plan.id, detail: { from: plan.name, to: clean } });
+    ctx.redirect(backToModel(ctx, plan.id));
   });
 
   // Copy a plan whole — hires, assumptions and per-employee overrides.
@@ -325,7 +336,10 @@ export function registerBudgetRoutes(router) {
     }
     try {
       const client = clientFromConfig(ctx.config);
-      const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), client });
+      // Real per-department pay, so "pay them the department average" resolves to an
+      // actual figure rather than a number the model invents.
+      const payStats = departmentPayStats(listEmployees(ctx.db, {}));
+      const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), payStats, client });
       if (!parsed.length) return renderModel(ctx, plan.id, { aiError: "Couldn't turn that into a hire — name a department, count, start month, and salary." });
       // The model returns {department, role, count, ...}; explode into individually
       // editable records so AI-added hires behave exactly like hand-added ones.

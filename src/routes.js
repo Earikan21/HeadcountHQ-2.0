@@ -4,6 +4,7 @@
  */
 import { registerHomeRoutes } from "./routes/home.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerTwoFactorRoutes } from "./routes/twofactor.js";
 import { registerAccountRoutes } from "./routes/accounts.js";
 import { registerDepartmentRoutes } from "./routes/departments.js";
 import { registerRosterRoutes } from "./routes/roster.js";
@@ -27,6 +28,7 @@ export function registerRoutes(router, deps = {}) {
 
   registerHomeRoutes(router);
   registerAuthRoutes(router);
+  registerTwoFactorRoutes(router);
   registerAccountRoutes(router);
   registerDepartmentRoutes(router);
   registerRosterRoutes(router);

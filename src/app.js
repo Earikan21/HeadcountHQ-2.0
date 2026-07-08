@@ -49,6 +49,9 @@ export function buildApp({ config, db }) {
       ensureCsrfCookie(ctx);
       // Attach the logged-in user, if any.
       attachUser(ctx);
+      // Two-factor gate: hold a password-only session at the code step, and force
+      // enrollment for anyone not yet set up. Runs before dispatch so no page leaks.
+      if (mfaGate(ctx)) return;
 
       const matched = router.match(req.method, pathname);
       if (!matched) return ctx.send(404, "text/html; charset=utf-8", notFoundPage());
@@ -139,6 +142,20 @@ function csrfOk(ctx) {
   } catch {
     return false;
   }
+}
+
+/**
+ * When 2FA is enforced, keep a logged-in user out of the app until they've both
+ * enrolled and cleared the second factor. The allowlist is exactly the pages needed
+ * to do those two things (plus sign-out); everything else redirects.
+ */
+const MFA_ALLOW = new Set(["/login/2fa", "/account/2fa/setup", "/account/2fa/enable", "/logout"]);
+function mfaGate(ctx) {
+  if (!ctx.config.mfaEnforced || !ctx.user) return false;
+  if (MFA_ALLOW.has(ctx.url.pathname)) return false;
+  if (ctx.session && ctx.session.mfa_pending) { ctx.redirect("/login/2fa"); return true; }
+  if (!ctx.user.totp_enabled) { ctx.redirect("/account/2fa/setup"); return true; }
+  return false;
 }
 
 function attachUser(ctx) {

@@ -23,8 +23,42 @@ import { FUNCTION_CATEGORIES } from "../data/benchmarks.js";
 
 /** Privacy-safe AI assist available (configured on the host AND toggled on)? */
 const aiReady = (ctx) => Boolean(ctx.config.aiImportConfigured) && Boolean(getSettings(ctx.db).ai_import_enabled);
-/** Opt-in full-read available (configured AND the separate full-read toggle on)? */
+/** Full-read available (configured AND the toggle on — which it is by default)? */
 const aiFullReady = (ctx) => Boolean(ctx.config.aiImportConfigured) && Boolean(getSettings(ctx.db).ai_full_read_enabled);
+
+/**
+ * Does an auto-detected mapping recognise the file as a roster table? We only need the
+ * essentials — a name, a pay figure, and a department. If those can't be found, the
+ * file is messy or non-tabular and full-read should interpret it. (Employee ID is
+ * required at commit, but its absence isn't a sign of a messy file, so it doesn't
+ * trigger full-read — the user maps it on the review step.)
+ */
+function mappingRecognisesTable(mapping) {
+  if (!mapping) return false;
+  const has = (k) => Boolean(mapping[k]);
+  const named = has("name") || (has("first_name") && has("last_name"));
+  return named && has("compensation_amount") && has("department");
+}
+
+/**
+ * Send the whole file to the provider and rebuild a clean table. Shared by the upload
+ * auto-trigger and the (kept) manual endpoint. Returns {ok} rather than throwing so
+ * either caller can fall back to manual mapping.
+ */
+async function runFullRead(ctx, batch) {
+  if (!batch || batch.status !== "draft" || !aiFullReady(ctx)) return { ok: false };
+  try {
+    const client = clientFromConfig(ctx.config);
+    const res = await fullReadInterpret({ matrix: batch.matrix, client });
+    replaceBatchMatrix(ctx.db, batch.id, res.matrix, res.mapping);
+    recordImportRun(ctx.db, { batchId: batch.id, userId: ctx.user.id, phase: "mapping", usedAi: true, provider: ctx.config.AI_IMPORT_PROVIDER, suggestionCount: res.count });
+    logAudit(ctx.db, { userId: ctx.user.id, action: "import.ai_fullread", entity: "import_batch", entityId: batch.id, detail: { people: res.count, truncated: res.truncated } });
+    return { ok: true, count: res.count };
+  } catch (e) {
+    console.error(`[ai-import] fullread failed: ${e && e.message ? e.message : e}`);
+    return { ok: false };
+  }
+}
 
 const compCell = (user, annual) => {
   if (annual == null) return "—";
@@ -180,6 +214,8 @@ export function registerRosterRoutes(router) {
     const batch = createBatch(ctx.db, { filename: file.filename, matrix, headerRow, mapping, createdBy: ctx.user.id });
     logAudit(ctx.db, { userId: ctx.user.id, action: "import.uploaded", entity: "import_batch", entityId: batch.id, detail: { filename: file.filename, rows: batch.row_count } });
     // Auto-run AI column mapping when AI is configured — no button needed.
+    let effectiveMapping = mapping;
+    let aiFlag = null;
     if (aiReady(ctx)) {
       try {
         const full = getBatch(ctx.db, batch.id);
@@ -187,12 +223,20 @@ export function registerRosterRoutes(router) {
         const res = await suggestMapping({ headers: full.headers, rows: full.rawRows, client });
         updateBatchMapping(ctx.db, batch.id, res.mapping);
         recordImportRun(ctx.db, { batchId: batch.id, userId: ctx.user.id, phase: "mapping", usedAi: res.source === "ai", provider: ctx.config.AI_IMPORT_PROVIDER, suggestionCount: Object.values(res.mapping).filter(Boolean).length });
-        return ctx.redirect(`/roster/import/${batch.id}/map?ai=${res.source === "ai" ? 1 : 0}`);
+        effectiveMapping = res.mapping;
+        aiFlag = res.source === "ai" ? 1 : 0;
       } catch (e) {
         console.error(`[ai-import] auto-map failed: ${e && e.message ? e.message : e}`);
       }
     }
-    ctx.redirect(`/roster/import/${batch.id}/map`);
+    // Messy or non-tabular? Full-read runs automatically (it's on by default) and
+    // rebuilds a clean table — no opt-in card, straight to review.
+    if (!mappingRecognisesTable(effectiveMapping) && aiFullReady(ctx)) {
+      const fr = await runFullRead(ctx, getBatch(ctx.db, batch.id));
+      if (fr.ok) return ctx.redirect(`/roster/import/${batch.id}/review?fr=ok`);
+      return ctx.redirect(`/roster/import/${batch.id}/map?fr=failed${aiFlag != null ? "&ai=" + aiFlag : ""}`);
+    }
+    ctx.redirect(`/roster/import/${batch.id}/map${aiFlag != null ? "?ai=" + aiFlag : ""}`);
   });
 
   // ---- Step 2: map columns ----
@@ -279,23 +323,14 @@ export function registerRosterRoutes(router) {
   // ---- AI full read (opt-in): interpret a messy / non-tabular file ----
   // Sends the raw file contents to the provider. Gated behind the separate
   // ai_full_read_enabled setting. No deterministic fallback — errors surface.
+  // Manual re-run of full read (kept as a fallback; it normally runs on upload).
   router.post("/roster/import/:id/fullread", async (ctx) => {
     if (!requirePermission(ctx, canImportRoster)) return;
     const batch = getBatch(ctx.db, Number(ctx.params.id));
     if (!batch || batch.status !== "draft") return ctx.redirect("/roster/import");
     if (!aiFullReady(ctx)) return ctx.redirect(`/roster/import/${batch.id}/map`);
-    const client = clientFromConfig(ctx.config);
-    try {
-      const res = await fullReadInterpret({ matrix: batch.matrix, client });
-      replaceBatchMatrix(ctx.db, batch.id, res.matrix, res.mapping);
-      recordImportRun(ctx.db, { batchId: batch.id, userId: ctx.user.id, phase: "mapping",
-        usedAi: true, provider: ctx.config.AI_IMPORT_PROVIDER, suggestionCount: res.count });
-      logAudit(ctx.db, { userId: ctx.user.id, action: "import.ai_fullread", entity: "import_batch", entityId: batch.id, detail: { people: res.count, truncated: res.truncated } });
-      ctx.redirect(`/roster/import/${batch.id}/review?fr=ok`);
-    } catch (e) {
-      console.error(`[ai-import] fullread failed: ${e && e.message ? e.message : e}`);
-      ctx.redirect(`/roster/import/${batch.id}/map?fr=failed`);
-    }
+    const fr = await runFullRead(ctx, batch);
+    ctx.redirect(fr.ok ? `/roster/import/${batch.id}/review?fr=ok` : `/roster/import/${batch.id}/map?fr=failed`);
   });
 
   // ---- Step 3: review ----
@@ -434,13 +469,8 @@ function mapPage(ctx, { batch, errors }) {
     ? html`<div class="flash warn">AI full read couldn't interpret that file. Try fixing the header row above, or map the columns manually.</div>`
     : "";
   const aiPanel = ""; // AI mapping now runs automatically on upload (Directive 4.0)
-  const fullReadPanel = aiFullReady(ctx)
-    ? html`<form method="post" action="/roster/import/${batch.id}/fullread" class="aiassist warn-assist">
-        ${csrfField(ctx)}
-        <div><b>⚠️ Messy or non-tabular file? AI full read</b><p class="muted small" style="margin:2px 0 0">For files that aren't a clean table. Sends the <b>actual file contents</b> (names &amp; salaries) to your provider, then rebuilds a clean table for review.</p></div>
-        <button class="btn ghost sm" type="submit">Read whole file</button>
-      </form>`
-    : "";
+  // Full read runs automatically on upload for messy files, so no opt-in card here.
+  const fullReadPanel = "";
 
   const body = html`
     <div class="pagehead"><h1>Map your columns</h1><p class="muted">${batch.filename} · ${batch.rawRows.length} rows</p></div>
