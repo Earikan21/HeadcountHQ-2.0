@@ -84,3 +84,27 @@ test("assumptions: bonus %, hiring slippage, and one-time cost per hire", () => 
   assert.equal(slip.roster[0].active[2], 0); // originally Mar
   assert.equal(slip.roster[0].active[4], 1); // slipped +2 -> May
 });
+
+test("the window extends to December so the final calendar year is whole", async () => {
+  const { deriveWindow, buildHeadcountModel } = await import("../src/domain/model.js");
+  const now = new Date("2026-07-15"); // now + 60 months lands on Jul 2031
+  const emp = [{ name: "A", employee_ext_id: "E1", department_name: "Eng", annual_salary: 120000, employment_status: "active", start_date: "2024-01-01" }];
+
+  // The raw window would end mid-year; it must round up to December of that year.
+  const w = deriveWindow(emp, now);
+  const lastAbs = (w.start.year * 12 + w.start.month0) + w.months - 1;
+  assert.equal(lastAbs % 12, 11, "last column is December");
+
+  const m = buildHeadcountModel({ employees: emp, loadedMultiplier: 1.2, now });
+  assert.equal(m.cols[m.cols.length - 1].fullLabel, "Dec-2031");
+  const y2031 = m.years.find((y) => y.year === 2031);
+  assert.equal(y2031.months, 12, "the trailing year has all 12 months");
+  assert.equal(Math.round(y2031.totalCost), 144000, "and its total is a full year, not a half");
+
+  // Holds across horizons: every year but the (partial, correct) first one is complete.
+  for (const h of [1, 3, 10]) {
+    const mm = buildHeadcountModel({ employees: emp, loadedMultiplier: 1.2, now, assumptions: { horizonYears: h } });
+    assert.equal(mm.cols[mm.cols.length - 1].month0, 11, `horizon ${h}y ends in December`);
+    assert.ok(mm.years.slice(1).every((y) => y.months === 12), `horizon ${h}y: interior/trailing years are whole`);
+  }
+});
