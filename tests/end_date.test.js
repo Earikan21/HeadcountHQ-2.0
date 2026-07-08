@@ -194,9 +194,10 @@ test("a departure can be scheduled for a future month and takes effect only then
   const m = buildHeadcountModel({ employees: rows, loadedMultiplier: 1.2, start: { year: y, month0: 7 }, months: 4, now: new Date() });
   assert.deepEqual(m.monthlyHeadcount, [1, 1, 0, 0], "Aug + Sep on, Oct off");
 
-  // the sheet shows the scheduled month and swaps End for Restore
+  // the sheet shows the scheduled month in its own Ends column, and swaps End for Restore
   const page = await (await c.get("/model")).text();
-  assert.match(page, new RegExp(`→ ${y}-09`), "the row shows when they leave");
+  assert.match(page, /<th class="sortable " rowspan="2" data-sort="end"[^>]*>Ends<\/th>/);
+  assert.match(page, new RegExp(`<td class="num">${y}-09</td>`), "the Ends cell shows when they leave");
   assert.match(page, new RegExp(`action="/roster/${emp.id}/restore"`));
   await c.post(`/roster/${emp.id}/restore`, {});
 });

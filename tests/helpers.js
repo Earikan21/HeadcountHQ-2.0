@@ -70,6 +70,7 @@ export function makeClient(base) {
               status: res.statusCode,
               headers: { get: (name) => res.headers[String(name).toLowerCase()] ?? null, raw: res.headers },
               text: async () => text,
+              json: async () => JSON.parse(text),
               body: text,
             });
           });
@@ -110,8 +111,11 @@ export function makeClient(base) {
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
     }
     if (file) {
-      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${file.field}"; filename="${file.filename}"\r\nContent-Type: text/csv\r\n\r\n`));
-      parts.push(Buffer.from(file.content, "utf8"));
+      const ctype = file.contentType || (/\.xlsx?$/i.test(file.filename)
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv");
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${file.field}"; filename="${file.filename}"\r\nContent-Type: ${ctype}\r\n\r\n`));
+      // Buffers pass through byte-for-byte; strings are encoded as utf8.
+      parts.push(Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, "utf8"));
       parts.push(Buffer.from("\r\n"));
     }
     parts.push(Buffer.from(`--${boundary}--\r\n`));

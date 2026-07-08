@@ -36,7 +36,7 @@ test("import auto-detects the header row beneath a title row", async () => {
   assert.match(review, /Clean &amp; ready/);
 
   const commit = await c.post(`/roster/import/${id}/commit`, {});
-  assert.match(commit.headers.get("location"), /Imported\+2\+employees/);
+  assert.match(commit.headers.get("location"), /\/roster\?imported=2/);
 });
 
 test("user can override the header row when auto-detect is wrong", async () => {

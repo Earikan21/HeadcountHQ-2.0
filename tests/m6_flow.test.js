@@ -39,11 +39,13 @@ test("org chart renders the department hierarchy", async () => {
   await srv.close();
 });
 
-test("uploading an Excel file is rejected with a helpful message", async () => {
+test("a corrupt Excel file is rejected with a helpful message (real ones import)", async () => {
   const { srv, c } = await admin();
   await c.get("/roster/import");
   const up = await c.upload("/roster/import", {}, { field: "file", filename: "roster.xlsx", content: "PKxx" });
   assert.equal(up.status, 400);
-  assert.match(await up.text(), /Save As .* CSV/i);
+  const body = await up.text();
+  assert.match(body, /Not a readable \.xlsx/);
+  assert.ok(!/Save As/i.test(body), "Excel is supported now — no re-save-as-CSV workaround");
   await srv.close();
 });

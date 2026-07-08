@@ -9,14 +9,24 @@ test("CSV adapter parses an upload into a matrix", () => {
   assert.deepEqual(r.matrix[0], ["a", "b"]);
 });
 
-test("xlsx upload returns a friendly 'save as CSV' message", () => {
+test("xlsx is handled natively; a corrupt one fails with a message, not a crash", () => {
   const r = parseUpload("roster.xlsx", Buffer.from("PK..."));
-  assert.equal(r.matrix, null);
-  assert.match(r.error, /Save As .* CSV/i);
+  assert.equal(r.matrix, null, "a truncated workbook is rejected");
+  assert.match(r.error, /Not a readable \.xlsx/);
+  assert.ok(!/Save As/i.test(r.error), "we no longer tell people to re-save as CSV");
 });
 
-test("registry advertises the CSV adapter", () => {
+test("the old binary .xls still gets a friendly nudge", () => {
+  const r = parseUpload("roster.xls", Buffer.from("junk"));
+  assert.equal(r.matrix, null);
+  assert.match(r.error, /old binary \.xls/);
+});
+
+test("registry advertises the CSV and XLSX adapters", () => {
   assert.ok(listAdapters().some((a) => a.id === "csv"));
+  assert.ok(listAdapters().some((a) => a.id === "xlsx"));
   assert.equal(adapterFor("x.tsv").id, "csv");
+  assert.equal(adapterFor("x.xlsx").id, "xlsx");
+  assert.equal(adapterFor("x.xlsm").id, "xlsx");
   assert.equal(adapterFor("x.pdf"), null);
 });

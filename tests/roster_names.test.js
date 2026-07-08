@@ -25,7 +25,7 @@ test("imports a roster with separate First/Last name columns", async () => {
   assert.match(review, /Clean &amp; ready/);
 
   const commit = await c.post(`/roster/import/${id}/commit`, {});
-  assert.match(commit.headers.get("location"), /Imported\+2\+employees/);
+  assert.match(commit.headers.get("location"), /\/roster\?imported=2/);
 
   // names were combined
   const row = srv.db.prepare("SELECT name FROM employees WHERE employee_ext_id='E-1'").get();

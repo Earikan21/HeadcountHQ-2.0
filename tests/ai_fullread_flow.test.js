@@ -78,7 +78,7 @@ test("full read: messy file -> normalized table -> review -> commit", async () =
 
   const commit = await c.post(`/roster/import/${id}/commit`, {});
   assert.equal(commit.status, 303);
-  assert.match(commit.headers.get("location"), /Imported\+2\+employees/);
+  assert.match(commit.headers.get("location"), /\/roster\?imported=2/);
 
   const dana = srv.db.prepare("SELECT job_title FROM employees WHERE name='Dana Lee'").get();
   assert.equal(dana.job_title, "Senior Engineer");

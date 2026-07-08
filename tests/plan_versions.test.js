@@ -22,9 +22,12 @@ test("create a named plan, add a hire, and see it layered on the model", async (
   await admin.post(`/model/versions/${id}/hire`, { scn_department: "Sales", scn_role: "AE", scn_start: "2027-06", scn_salary: "120000", scn_count: "2" });
   page = await (await admin.get("/model?version=" + id)).text();
   assert.match(page, /class="prow scn"/);
-  assert.match(page, /2× AE/);
+  // count:2 now creates two individually editable people, each with its own chip
+  assert.match(page, /AE 1/);
+  assert.match(page, /AE 2/);
   const plan = srv.db.prepare("SELECT hires_json FROM plan_versions WHERE id=?").get(Number(id));
   assert.match(plan.hires_json, /"department":"Sales"/);
+  assert.deepEqual(JSON.parse(plan.hires_json).map((h) => h.id), ["h1", "h2"]);
 });
 
 test("Actual view has no scenario rows; deleting a plan removes it", async () => {

@@ -87,9 +87,9 @@ test("quarterly view aggregates columns", async () => {
   assert.match(page, /Q[1-4] '/);
 });
 
-test("admin sees add-person + duplicate controls; duplicating adds headcount", async () => {
+test("admin sees duplicate controls (but no add-person button); duplicating adds headcount", async () => {
   const page = await (await admin.get("/model")).text();
-  assert.match(page, /href="\/roster\/new"/);
+  assert.ok(!/href="\/roster\/new"/.test(page), "adding a person belongs on People, not the model");
   assert.match(page, /\/roster\/duplicate\//);
   const before = srv.db.prepare("SELECT COUNT(*) AS n FROM employees").get().n;
   const empId = srv.db.prepare("SELECT id FROM employees LIMIT 1").get().id;

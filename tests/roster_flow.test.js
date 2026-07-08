@@ -46,7 +46,7 @@ test("guided import: upload -> map -> review -> commit", async () => {
 
   const commit = await c.post(`/roster/import/${id}/commit`, {});
   assert.equal(commit.status, 303);
-  assert.match(commit.headers.get("location"), /Imported\+3\+employees/);
+  assert.match(commit.headers.get("location"), /\/roster\?imported=3/);
 
   // verify persistence
   const n = srv.db.prepare("SELECT COUNT(*) AS n FROM employees").get().n;
