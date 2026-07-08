@@ -32,9 +32,11 @@ test("a freshly set-up owner is forced to enroll before anything else", async ()
 
   // The setup page offers both a scannable QR and a typed key.
   const page = await (await admin.get("/account/2fa/setup")).text();
-  assert.match(page, /<svg xmlns/, "QR is rendered inline");
+  assert.match(page, /<img[^>]+src="https:\/\/api\.qrserver\.com\/v1\/create-qr-code\/[^"]*data=/, "QR served by the image service");
   assert.match(page, /Setup key/);
-  assert.match(page, /aria-label="QR code"/);
+  assert.match(page, /alt="Two-factor QR code"/);
+  // No app chrome during forced enrollment.
+  assert.ok(!/class="sidebar"/.test(page) && !/class="side-nav"/.test(page), "no menu until 2FA is set up");
   assert.ok(secretOf("ada@acme.co"), "a candidate secret was parked on the account");
   assert.equal(srv.db.prepare("SELECT totp_enabled FROM users WHERE email='ada@acme.co'").get().totp_enabled, 0);
 });
@@ -63,6 +65,8 @@ test("a new login requires the second factor", async () => {
   await c.get("/login");
   const afterPw = await c.post("/login", { email: "ada@acme.co", password: "supersecret123" });
   assert.equal(afterPw.headers.get("location"), "/login/2fa", "password alone lands on the code step");
+  const codePage = await (await c.get("/login/2fa")).text();
+  assert.ok(!/class="sidebar"/.test(codePage) && !/class="side-nav"/.test(codePage), "the code step shows no menu");
   // still sealed off until the code
   assert.equal((await c.get("/")).headers.get("location"), "/login/2fa");
   assert.equal((await c.get("/roster")).headers.get("location"), "/login/2fa");
