@@ -222,6 +222,19 @@ export function financialModelPage(ctx, model, extra = {}) {
     <a class="btn ghost sm" href="${q("/budgets/export.csv")}">Export CSV</a>
   </div>`;
 
+  // Fully-loaded cost is editable everywhere — on Actual it sets the workspace default;
+  // inside a plan the Assumptions section overrides it (per plan / per department).
+  const loadControl = (!extra.current && extra.canEdit) ? html`<form method="post" action="/model/load" class="load-control">
+    ${csrfField(ctx)}
+    ${extra.dept ? html`<input type="hidden" name="dept" value="${extra.dept}">` : ""}
+    <input type="hidden" name="period" value="${period}">
+    <label>Fully-loaded cost <span class="muted">= base +</span>
+      <input name="load_pct" type="number" min="0" max="200" step="1" value="${benefitsPct}" aria-label="Benefits and taxes load, percent of base">
+      <span class="muted">% (benefits, taxes, overhead)</span>
+    </label>
+    <button class="btn sm ghost" type="submit">Apply</button>
+  </form>` : "";
+
   const sortableHead = (key, label, type, cls = "") => raw(`<th class="sortable ${cls}" rowspan="2" data-sort="${key}" data-type="${type}">${label}</th>`);
   const yearGroupHead = groups.map((g) => {
     const multi = g.pos.length > 1;
@@ -335,6 +348,7 @@ export function financialModelPage(ctx, model, extra = {}) {
     <div class="hm-line">Headcount model${extra.dept ? " · " + extra.dept : ""} <span class="muted">${range} · fully loaded (base + ${benefitsPct}% benefits/taxes)</span></div>
     ${dash}
     ${controls}
+    ${loadControl}
     ${planBar(ctx, extra)}
     ${planEditor(ctx, extra)}
     ${editable ? html`<input type="hidden" id="model-csrf" value="${ctx.csrf}">

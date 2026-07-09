@@ -8,7 +8,7 @@ import {
 } from "../repos/budgets.js";
 import { expectedRange } from "../domain/budget.js";
 import { listDepartments } from "../repos/departments.js";
-import { getSettings } from "../repos/settings.js";
+import { getSettings, updateSettings } from "../repos/settings.js";
 import { financialModelPage } from "../views/model.js";
 import { buildHeadcountModel, applyPlanOverrides, periodBuckets, periodize, yearGroupsOf, modelKpis, windowKey } from "../domain/model.js";
 import { alignedWindow, comparePlans } from "../domain/compare.js";
@@ -321,6 +321,26 @@ export function registerBudgetRoutes(router) {
       setPlanOverrides(ctx.db, plan.id, o);
     }
     ctx.redirect(backToModel(ctx, plan.id));
+  });
+
+  // Set the workspace-wide fully-loaded cost (benefits/taxes/overhead as a % on base).
+  // This is what Actual uses; a plan may still override it in its assumptions.
+  router.post("/model/load", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const lp = String(ctx.body.load_pct == null ? "" : ctx.body.load_pct).trim();
+    const n = Number(lp);
+    if (lp !== "" && Number.isFinite(n) && n >= 0) {
+      const mult = Math.round((1 + Math.min(200, n) / 100) * 10000) / 10000;
+      updateSettings(ctx.db, { ...getSettings(ctx.db), loaded_cost_multiplier: mult }, ctx.user.id);
+      logAudit(ctx.db, { userId: ctx.user.id, action: "settings.loaded_cost", entity: "workspace_settings", detail: { multiplier: mult } });
+    }
+    const dept = String(ctx.body.dept || "").trim();
+    const period = String(ctx.body.period || "").trim();
+    const version = String(ctx.body.version || "").trim();
+    ctx.redirect("/model" +
+      (version ? "?version=" + encodeURIComponent(version) : "") +
+      (dept ? (version ? "&" : "?") + "dept=" + encodeURIComponent(dept) : "") +
+      (["month", "quarter", "year"].includes(period) ? (version || dept ? "&" : "?") + "period=" + period : ""));
   });
 
   // Save a plan's assumptions / drivers (YoY salary growth, benefits load override).
