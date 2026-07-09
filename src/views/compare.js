@@ -25,12 +25,17 @@ function chart(diff) {
   const line = (pick) => years.map((yr, i) => `${x(i).toFixed(1)},${y(pick(yr)).toFixed(1)}`).join(" ");
   const dots = (pick, cls) => years.map((yr, i) => raw(`<circle class="${cls}" cx="${x(i).toFixed(1)}" cy="${y(pick(yr)).toFixed(1)}" r="3"/>`));
 
+  // Horizontal gridlines with $ labels so the lines can be read as amounts.
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+    const gy = (T + (H - T - B) * (1 - f)).toFixed(1);
+    return raw(`<line class="grid" x1="${L}" y1="${gy}" x2="${W - R}" y2="${gy}"></line><text class="tick" x="${L - 8}" y="${Number(gy) + 3}" text-anchor="end">${esc(moneyShort(max * f))}</text>`);
+  });
+
   return html`<figure class="cmp-chart">
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Fully-loaded cost by year, ${diff.aLabel} versus ${diff.bLabel}">
+    <figcaption class="cmp-cap">Total fully-loaded cost per year — each point is a whole year's cost. Higher line = more expensive plan.</figcaption>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Total fully-loaded cost by year, ${diff.aLabel} versus ${diff.bLabel}">
+      ${grid}
       <line class="ax" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"></line>
-      <line class="ax" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"></line>
-      ${raw(`<text class="tick" x="${L - 8}" y="${T + 4}" text-anchor="end">${esc(moneyShort(max))}</text>`)}
-      ${raw(`<text class="tick" x="${L - 8}" y="${H - B}" text-anchor="end">0</text>`)}
       ${years.map((yr, i) => raw(`<text class="tick" x="${x(i).toFixed(1)}" y="${H - B + 16}" text-anchor="middle">${yr.year}</text>`))}
       ${raw(`<polyline class="ln a" points="${line((v) => v.aCost)}"/>`)}
       ${raw(`<polyline class="ln b" points="${line((v) => v.bCost)}"/>`)}
@@ -40,7 +45,6 @@ function chart(diff) {
     <figcaption class="cmp-legend">
       <span class="key a"></span>${diff.aLabel}
       <span class="key b"></span>${diff.bLabel}
-      <span class="muted small">fully-loaded cost per year</span>
     </figcaption>
   </figure>`;
 }

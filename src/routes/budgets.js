@@ -271,6 +271,41 @@ export function registerBudgetRoutes(router) {
     return ctx.json(200, { ok: true, value: res.value, overridden: res.overridden, marks: res.marks, ...recompute(ctx, fresh, edit.key) });
   });
 
+  // Duplicate a scenario hire (copy inserted right after it).
+  router.post("/model/versions/:id/hire/:hid/duplicate", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const hires = planHires(plan);
+    const idx = hires.findIndex((h) => String(h.id) === String(ctx.params.hid));
+    if (idx >= 0) {
+      const src = hires[idx];
+      hires.splice(idx + 1, 0, { ...src, id: nextHireId(hires), name: (src.name || src.role || "Hire") + " (copy)" });
+      setPlanHires(ctx.db, plan.id, hires);
+    }
+    ctx.redirect(backToModel(ctx, plan.id));
+  });
+
+  // Duplicate a real person as a NEW scenario headcount (a copy of the role, starting now).
+  router.post("/model/versions/:id/emp/:extId/duplicate", (ctx) => {
+    if (!requirePermission(ctx, canSetBudgets)) return;
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.redirect("/model");
+    const emp = applyPlanOverrides(listEmployees(ctx.db, {}), planOverrides(plan)).find((e) => String(e.employee_ext_id) === String(ctx.params.extId));
+    if (emp) {
+      const hires = planHires(plan);
+      const now = new Date();
+      hires.push({
+        id: nextHireId(hires), department: emp.department_name || "(none)", role: emp.job_title || "Role",
+        name: (emp.name || emp.job_title || "New hire") + " (copy)",
+        start_month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`, end_month: null,
+        annual_salary: Number(emp.annual_salary) || 0,
+      });
+      setPlanHires(ctx.db, plan.id, hires);
+    }
+    ctx.redirect(backToModel(ctx, plan.id));
+  });
+
   /** Clear a row: drop the employee's overrides, or remove the scenario hire outright. */
   router.post("/model/versions/:id/row/reset", (ctx) => {
     if (!requirePermission(ctx, canSetBudgets)) return;
@@ -297,7 +332,12 @@ export function registerBudgetRoutes(router) {
     const dept = String(ctx.body.dept || "").trim();
     const fields = {
       salaryGrowthPct: Math.max(0, Math.min(100, Number(ctx.body.salary_growth) || 0)),
-      loadedMultiplier: Number(ctx.body.loaded_mult) > 0 ? Number(ctx.body.loaded_mult) : null,
+      loadedMultiplier: (() => {
+        const lp = String(ctx.body.loaded_pct == null ? "" : ctx.body.loaded_pct).trim();
+        if (lp === "") return null;                       // inherit the default
+        const n = Number(lp);
+        return Number.isFinite(n) && n >= 0 ? Math.round((1 + Math.min(200, n) / 100) * 10000) / 10000 : null;
+      })(),
       bonusPct: Math.max(0, Math.min(100, Number(ctx.body.bonus_pct) || 0)),
       hiringSlipMonths: Math.max(0, Math.min(24, Number(ctx.body.hiring_slip) || 0)),
       costPerHire: Math.max(0, Number(ctx.body.cost_per_hire) || 0),
@@ -340,7 +380,21 @@ export function registerBudgetRoutes(router) {
       // actual figure rather than a number the model invents.
       const payStats = departmentPayStats(listEmployees(ctx.db, {}));
       const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), payStats, client });
-      if (!parsed.length) return renderModel(ctx, plan.id, { aiError: "Couldn't turn that into a hire — name a department, count, start month, and salary." });
+      // Data validation before instating: if the AI couldn't pin down the essentials,
+      // ask for them rather than inventing a hire.
+      if (!parsed.length) {
+        return renderModel(ctx, plan.id, { aiAsk: `I need a little more before I can add that: which department, how many, a start month, and a salary (a number, or say "the department average"). You wrote: “${description.slice(0, 140)}”. Can you fill in what's missing?` });
+      }
+      const problems = [];
+      for (const h of parsed) {
+        if (!h.department || h.department === "(scenario)") problems.push("which department the " + (h.role || "hire") + " is in");
+        if (!(Number(h.annual_salary) > 0)) problems.push("a salary for the " + (h.role || "hire"));
+        if (Number(h.annual_salary) > 50_000_000) problems.push("a realistic salary for the " + (h.role || "hire") + " (that one looks like a typo)");
+        if (h.start_month && !/^\d{4}-\d{2}$/.test(String(h.start_month))) problems.push("a valid start month (YYYY-MM) for the " + (h.role || "hire"));
+      }
+      if (problems.length) {
+        return renderModel(ctx, plan.id, { aiAsk: "Before I add that, I need " + [...new Set(problems)].join(", and ") + ". Add those details and try again." });
+      }
       // The model returns {department, role, count, ...}; explode into individually
       // editable records so AI-added hires behave exactly like hand-added ones.
       const hires = planHires(plan);
@@ -434,22 +488,32 @@ function csvCell(v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/
  */
 export function modelToFormulaCsv(model) {
   const { cols, roster } = model;
-  const header = ["Department", "Name", "Role", "Annual Base", "Loaded Monthly"].concat(cols.map((c) => c.fullLabel));
+  // Every driver that feeds the model, not just the fully-loaded output.
+  const fixed = ["Department", "Name", "Role", "Status", "Start", "End",
+    "Annual Base", "Load %", "Bonus %", "Salary Growth %", "Cost per Hire", "Loaded Monthly"];
+  const header = fixed.concat(cols.map((c) => c.fullLabel));
   const lines = [header.map(csvCell).join(",")];
-  const first = 2; // row 1 is the header
+  const first = 2;                 // row 1 is the header
+  const MONTH0 = fixed.length;     // 0-based column index of the first month
   roster.forEach((r, i) => {
     const row = first + i;
-    const m = r.annualBase ? Math.round((r.loadedMonthly * 12 / r.annualBase) * 10000) / 10000 : (model.mult || 1.2);
-    const loaded = "=D" + row + "/12*" + m;
-    const months = cols.map((c, j) => (r.active[j] ? "=$E" + row : "0"));
-    lines.push([csvCell(r.department), csvCell(r.name || ""), csvCell(r.role || ""), Math.round(r.annualBase), loaded].concat(months).join(","));
+    // Loaded monthly stays live: recomputes from base, load and bonus cells.
+    const loaded = "=G" + row + "/12*(1+H" + row + "/100)*(1+I" + row + "/100)";
+    const months = r.monthlyCost.map((v) => Math.round(v)); // includes proration, growth & one-time cost
+    lines.push([
+      csvCell(r.department), csvCell(r.name || ""), csvCell(r.role || ""), csvCell(r.status || ""),
+      csvCell(r.startDate || ""), csvCell(r.endDate || ""),
+      Math.round(r.annualBase), r.loadPct, r.bonusPct, r.growthPct, Math.round(r.costPerHire), loaded,
+    ].concat(months).join(","));
   });
   const last = first + roster.length - 1;
   const sum = (L) => (roster.length ? "=SUM(" + L + first + ":" + L + last + ")" : "0");
-  const totals = ["TOTAL", "", "", sum("D"), sum("E")].concat(cols.map((c, j) => sum(colLetter(5 + j))));
+  const totals = ["TOTAL", "", "", "", "", "", sum("G"), "", "", "", sum("K"), sum("L")]
+    .concat(cols.map((c, j) => sum(colLetter(MONTH0 + j))));
   lines.push(totals.map(csvCell).join(","));
   return lines.join("\r\n") + "\r\n";
 }
+
 
 const bar = (used, budget, over) => {
   const pct = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0;

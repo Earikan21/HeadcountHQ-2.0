@@ -56,11 +56,15 @@
   }
   if (fSearch) { fSearch.addEventListener("input", applyFilters); fSearch.addEventListener("change", applyFilters); }
   // Department is a server-side scope (so the annual summary + subtotals recompute).
-  if (fDept) fDept.addEventListener("change", function () {
+  function scopeToDept(v) {
     var u = new URL(window.location.href);
-    if (fDept.value) u.searchParams.set("dept", fDept.value); else u.searchParams.delete("dept");
+    if (v) u.searchParams.set("dept", v); else u.searchParams.delete("dept");
     window.location.href = u.toString();
-  });
+  }
+  if (fDept) fDept.addEventListener("change", function () { scopeToDept(fDept.value); });
+  // The assumptions section has its own department selector (same server scope).
+  var asmDept = document.getElementById("asm-dept");
+  if (asmDept) asmDept.addEventListener("change", function () { scopeToDept(asmDept.value); });
 
   // ---- column (year) collapse ----
   // The server already renders every year but the current one collapsed, so seed each
@@ -280,4 +284,53 @@
       });
     });
   });
+
+  // ---- input validation: warn on out-of-place values before submitting ----
+  function monthOutOfRange(v) {
+    if (!/^\d{4}-\d{2}$/.test(v || "")) return false;
+    var y = Number(v.slice(0, 4));
+    return y < 1990 || y > 2100;
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("form[data-validate]"), function (f) {
+    f.addEventListener("submit", function (ev) {
+      var warnings = [];
+      Array.prototype.forEach.call(f.querySelectorAll("input"), function (inp) {
+        var v = (inp.value || "").trim();
+        if (v === "") return;
+        if (inp.getAttribute("data-check") === "salary" || inp.name === "scn_salary") {
+          var n = Number(v);
+          if (!isFinite(n) || n < 0) warnings.push("The salary can't be negative.");
+          else if (n > 50000000) warnings.push("That salary looks like a typo (over $50M).");
+        }
+        if (inp.getAttribute("type") === "month" && monthOutOfRange(v)) warnings.push("The date " + v + " looks out of range (expected a year 1990-2100).");
+      });
+      var st = f.querySelector('input[name="scn_start"]'), en = f.querySelector('input[name="scn_end"]');
+      if (st && en && st.value && en.value && en.value < st.value) warnings.push("The end month is before the start month.");
+      if (warnings.length && !window.confirm(warnings.join("\n") + "\n\nAdd it anyway?")) ev.preventDefault();
+    });
+  });
+
+  // ---- first time a plan is opened: prompt to set headcount ----
+  (function firstOpenPrompt() {
+    var version = sheet.getAttribute("data-version");
+    if (!version || sheet.getAttribute("data-editable") !== "1") return;
+    var scrim = document.getElementById("plan-welcome");
+    if (!scrim) return;
+    var seen = false;
+    try { seen = (localStorage.getItem("hq_plan_seen_" + version) === "1"); } catch (e) {}
+    if (seen) { if (scrim.parentNode) scrim.parentNode.removeChild(scrim); return; }
+    scrim.hidden = false;
+    function dismiss() {
+      try { localStorage.setItem("hq_plan_seen_" + version, "1"); } catch (e) {}
+      scrim.hidden = true;
+    }
+    Array.prototype.forEach.call(scrim.querySelectorAll("[data-dismiss]"), function (b) { b.addEventListener("click", dismiss); });
+    scrim.addEventListener("click", function (e) { if (e.target === scrim) dismiss(); });
+    var add = scrim.querySelector("[data-open-add]");
+    if (add) add.addEventListener("click", function () {
+      var det = document.querySelector("details.add-scn");
+      if (det) { det.open = true; det.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      dismiss();
+    });
+  })();
 })();

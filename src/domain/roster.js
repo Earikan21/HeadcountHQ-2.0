@@ -155,7 +155,11 @@ export function normalizeDate(v) {
 
 export function buildCanonical(rawRows, mapping, assumptions, opts = {}) {
   assumptions = { ...DEFAULT_ASSUMPTIONS, ...(assumptions || {}) };
-  const get = (row, key) => (mapping[key] ? row[mapping[key]] : undefined);
+  const get = (row, key) => {
+    const m = mapping[key];
+    if (m && typeof m === "object") return m.value; // a fixed value assigned during import
+    return m ? row[m] : undefined;
+  };
   const seenIds = new Map();
   const rows = [];
 

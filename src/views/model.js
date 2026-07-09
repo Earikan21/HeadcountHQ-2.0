@@ -73,59 +73,76 @@ function planBar(ctx, extra) {
   </div>`;
 }
 
-/** The plan editor: both sections collapsed by default so the sheet stays visible. */
+/** The plan editor: a prominent "add headcount" button and a compact, open-by-default
+ *  assumptions strip with an inline department selector. */
 function planEditor(ctx, extra) {
   const cur = extra.current;
   if (!cur || !extra.canEdit) return "";
   const hires = extra.hires || [];
   const scope = extra.dept || null;
+  const allDepts = extra.allDepartments || [];
   const A = extra.assumptions || {};
   const cv = scope ? ((A.byDept && A.byDept[scope]) || {}) : A;
   const ph = (k, dflt) => (scope && A[k] != null && A[k] !== "" ? String(A[k]) : dflt);
   const val = (v) => (v != null && v !== "" ? String(v) : "");
+  // Benefits/taxes load is shown as a percentage on top of base (30 => x1.30).
+  const multToPct = (m) => (Number(m) > 0 ? Math.round((Number(m) - 1) * 1000) / 10 : "");
+  const loadPctVal = cv.loadedMultiplier != null && cv.loadedMultiplier !== "" ? String(multToPct(cv.loadedMultiplier)) : "";
+  const loadPctPh = scope && A.loadedMultiplier ? String(multToPct(A.loadedMultiplier)) : "e.g. 30";
   const window_ = (h) => (h.start_month || "start") + (h.end_month ? " → " + h.end_month : "");
   const chips = hires.length
-    ? html`<div class="hire-chips">${hires.map((h) => html`<span class="${cx("chip", h.end_month && "temp")}">${h.name || h.role} · ${h.department} · ${window_(h)} · ${money(h.annual_salary)}<form method="post" action="/model/versions/${cur.id}/hire/${h.id}/delete" class="inline">${csrfField(ctx)}<button class="chip-x" type="submit" aria-label="remove">×</button></form></span>`)}</div>`
-    : html`<p class="muted small">No planned hires yet.</p>`;
+    ? html`<div class="hire-chips">${hires.map((h) => html`<span class="${cx("chip", h.end_month && "temp")}">${h.name || h.role} · ${h.department} · ${window_(h)} · ${money(h.annual_salary)}<form method="post" action="/model/versions/${cur.id}/hire/${h.id}/duplicate" class="inline">${csrfField(ctx)}<button class="chip-dup" type="submit" aria-label="duplicate" title="Duplicate this hire">⧉</button></form><form method="post" action="/model/versions/${cur.id}/hire/${h.id}/delete" class="inline">${csrfField(ctx)}<button class="chip-x" type="submit" aria-label="remove">×</button></form></span>`)}</div>`
+    : html`<p class="muted small">No planned hires yet — add one above.</p>`;
+
+  const addSection = html`<details class="add-scn">
+    <summary class="add-scn-btn"><span class="plus" aria-hidden="true">+</span> Add scenario headcount</summary>
+    <div class="add-scn-body">
+      ${extra.aiReady ? html`<form method="post" action="/model/versions/${cur.id}/ai" class="scn-ai" data-validate>${csrfField(ctx)}<input name="description" placeholder="Describe it in plain English — e.g. 2 AEs in Sales starting Jun 2027 at $120k" aria-label="Describe hires"><button class="btn sm" type="submit">Add with AI</button></form>
+      <div class="scn-or"><span>or add one manually</span></div>` : ""}
+      <form method="post" action="/model/versions/${cur.id}/hire" class="scn-manual" data-validate>
+        ${csrfField(ctx)}
+        <input name="scn_department" placeholder="Dept" aria-label="Department">
+        <input name="scn_role" placeholder="Role" aria-label="Role">
+        <label class="mo">Start <input name="scn_start" type="month" aria-label="Start month"></label>
+        <label class="mo">End <input name="scn_end" type="month" aria-label="End month (optional)"></label>
+        <input name="scn_salary" type="number" min="0" step="1000" placeholder="Annual $" aria-label="Annual salary" data-check="salary">
+        <input name="scn_count" type="number" min="1" step="1" value="1" aria-label="Count" class="tiny">
+        <button class="btn sm ghost" type="submit">Add</button>
+      </form>
+      <p class="muted small">Leave <b>End</b> blank for a permanent hire; set it to add headcount for a limited time. To remove existing headcount, use <b>End</b> on a person's row.</p>
+      ${chips}
+    </div>
+  </details>`;
+
+  const deptSelect = html`<select id="asm-dept" data-version="${cur.id}" aria-label="Department these assumptions apply to">
+    <option value="">Company-wide default</option>
+    ${allDepts.map((d) => html`<option value="${d}" ${scope === d ? raw("selected") : ""}>${d}</option>`)}
+  </select>`;
+  const asmSection = html`<details class="asm-sect" open>
+    <summary>Assumptions &amp; drivers${scope ? " · " + scope : ""}</summary>
+    <div class="asm-sect-body">
+      <div class="asm-scope">Applies to ${deptSelect}<span class="muted small">${scope ? "blank fields fall back to the company default" : "the whole company — pick a department to override it"}</span></div>
+      <form method="post" action="/model/versions/${cur.id}/assumptions" class="asm-form" data-validate>
+        ${csrfField(ctx)}
+        ${scope ? html`<input type="hidden" name="dept" value="${scope}">` : ""}
+        <label class="asm">YoY salary growth <span class="muted">%</span><input name="salary_growth" type="number" min="0" max="100" step="0.5" value="${val(cv.salaryGrowthPct)}" placeholder="${ph("salaryGrowthPct", "0")}"></label>
+        <label class="asm">Benefits &amp; taxes load <span class="muted">% on base</span><input name="loaded_pct" type="number" min="0" max="200" step="1" value="${loadPctVal}" placeholder="${loadPctPh}"></label>
+        <label class="asm">Target bonus <span class="muted">% of base</span><input name="bonus_pct" type="number" min="0" max="100" step="1" value="${val(cv.bonusPct)}" placeholder="${ph("bonusPct", "0")}"></label>
+        <label class="asm">Hiring slippage <span class="muted">months</span><input name="hiring_slip" type="number" min="0" max="24" step="1" value="${val(cv.hiringSlipMonths)}" placeholder="${ph("hiringSlipMonths", "0")}"></label>
+        <label class="asm">Cost per hire <span class="muted">one-time $</span><input name="cost_per_hire" type="number" min="0" step="500" value="${val(cv.costPerHire)}" placeholder="${ph("costPerHire", "0")}"></label>
+        <button class="btn sm ghost" type="submit">Save</button>
+      </form>
+    </div>
+  </details>`;
+
   return html`<section class="plan-editor">
     ${extra.aiError ? html`<div class="flash warn">${extra.aiError}</div>` : ""}
-    <details class="plan-sect">
-      <summary>Hires${hires.length ? " · " + hires.length : ""}</summary>
-      <div class="plan-sect-body">
-        ${extra.aiReady ? html`<form method="post" action="/model/versions/${cur.id}/ai" class="scn-ai">${csrfField(ctx)}<input name="description" placeholder="e.g. 2 AEs in Sales, Jun 2027, $120k" aria-label="Describe hires"><button class="btn sm" type="submit">AI</button></form>` : ""}
-        <form method="post" action="/model/versions/${cur.id}/hire" class="scn-manual">
-          ${csrfField(ctx)}
-          <input name="scn_department" placeholder="Dept" aria-label="Department">
-          <input name="scn_role" placeholder="Role" aria-label="Role">
-          <label class="mo">Start <input name="scn_start" type="month" aria-label="Start month"></label>
-          <label class="mo">End <input name="scn_end" type="month" aria-label="End month (optional)"></label>
-          <input name="scn_salary" type="number" min="0" step="1000" placeholder="Annual $" aria-label="Annual salary">
-          <input name="scn_count" type="number" min="1" step="1" value="1" aria-label="Count" class="tiny">
-          <button class="btn sm ghost" type="submit">Add</button>
-        </form>
-        <p class="muted small">Leave <b>End</b> blank for a permanent hire. Set it to add headcount for a limited time (a contractor, a backfill, a seasonal team). To remove existing headcount, use <b>End</b> on their row — or import an "End date" column for exact dates.</p>
-        ${chips}
-      </div>
-    </details>
-    <details class="plan-sect">
-      <summary>Assumptions &amp; drivers${scope ? " · " + scope : ""}</summary>
-      <div class="plan-sect-body">
-        <p class="muted small">${scope ? "Overrides for " + scope + " — leave blank to use the plan default." : "Company defaults. Scope to a department (filter above) to override per team."}</p>
-        <form method="post" action="/model/versions/${cur.id}/assumptions" class="asm-form">
-          ${csrfField(ctx)}
-          ${scope ? html`<input type="hidden" name="dept" value="${scope}">` : ""}
-          <label class="asm">YoY salary growth <span class="muted">%</span><input name="salary_growth" type="number" min="0" max="100" step="0.5" value="${val(cv.salaryGrowthPct)}" placeholder="${ph("salaryGrowthPct", "0")}"></label>
-          <label class="asm">Benefits / load <span class="muted">× base</span><input name="loaded_mult" type="number" min="1" max="3" step="0.01" value="${val(cv.loadedMultiplier)}" placeholder="${ph("loadedMultiplier", "default")}"></label>
-          <label class="asm">Target bonus <span class="muted">% of base</span><input name="bonus_pct" type="number" min="0" max="100" step="1" value="${val(cv.bonusPct)}" placeholder="${ph("bonusPct", "0")}"></label>
-          <label class="asm">Hiring slippage <span class="muted">months</span><input name="hiring_slip" type="number" min="0" max="24" step="1" value="${val(cv.hiringSlipMonths)}" placeholder="${ph("hiringSlipMonths", "0")}"></label>
-          <label class="asm">Cost per hire <span class="muted">one-time $</span><input name="cost_per_hire" type="number" min="0" step="500" value="${val(cv.costPerHire)}" placeholder="${ph("costPerHire", "0")}"></label>
-          <button class="btn sm ghost" type="submit">Save</button>
-        </form>
-        <p class="muted small">Salary growth compounds each year from now forward. Model length is set in the plan bar above.</p>
-      </div>
-    </details>
+    ${extra.aiAsk ? html`<div class="flash">${extra.aiAsk}</div>` : ""}
+    ${addSection}
+    ${asmSection}
   </section>`;
 }
+
 
 /**
  * Inside a plan the roster-mutating actions (End / Restore / Duplicate) are hidden:
@@ -137,12 +154,17 @@ function rowActions(ctx, r, extra, { isAdmin, editable, key }) {
   if (editable && key) {
     const back = html`${csrfField(ctx)}<input type="hidden" name="key" value="${key}">${extra.dept ? html`<input type="hidden" name="dept" value="${extra.dept}">` : ""}${extra.period ? html`<input type="hidden" name="period" value="${extra.period}">` : ""}`;
     if (r.scenario) {
-      return html`<td class="act"><form method="post" action="/model/versions/${extra.current.id}/row/reset" class="inline confirm-delete" data-confirm="Remove ${r.name || "this planned hire"} from this plan?">${back}<button class="linklike danger-link" type="submit" title="Remove this planned hire">Remove</button></form></td>`;
+      return html`<td class="act">
+        <form method="post" action="/model/versions/${extra.current.id}/hire/${r.hireId}/duplicate" class="inline">${back}<button class="linklike" type="submit" title="Duplicate this planned hire">Duplicate</button></form>
+        <form method="post" action="/model/versions/${extra.current.id}/row/reset" class="inline confirm-delete" data-confirm="Remove ${r.name || "this planned hire"} from this plan?">${back}<button class="linklike danger-link" type="submit" title="Remove this planned hire">Remove</button></form>
+      </td>`;
     }
     // Both states are rendered; JS flips them the moment a row becomes overridden,
-    // so Reset is reachable without a page load.
+    // so Reset is reachable without a page load. A real person can also be duplicated
+    // into a NEW scenario headcount (a copy of their role).
     const dirty = Boolean(r.overridden);
     return html`<td class="act">
+      <form method="post" action="/model/versions/${extra.current.id}/emp/${r.extId}/duplicate" class="inline">${back}<button class="linklike" type="submit" title="Add a copy of this role as scenario headcount">Duplicate</button></form>
       <form method="post" action="/model/versions/${extra.current.id}/row/reset" class="inline row-reset" ${dirty ? raw("") : raw("hidden")}>${back}<button class="linklike" type="submit" title="Discard this plan's edits to this person">Reset</button></form>
       <span class="muted small row-clean" ${dirty ? raw("hidden") : raw("")}>&mdash;</span>
     </td>`;
@@ -309,7 +331,20 @@ export function financialModelPage(ctx, model, extra = {}) {
   })() : "";
 
   const range = cols.length ? `${cols[0].fullLabel} – ${cols[cols.length - 1].fullLabel}` : "";
+  // First time this plan is opened, prompt the user to set headcount (JS decides
+  // whether to show it, per-plan, via localStorage).
+  const planWelcome = editable ? html`<div id="plan-welcome" class="modal-scrim" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="pw-h">
+      <h2 id="pw-h">Plan “${extra.current.name}”</h2>
+      <p class="muted small">This plan starts as an exact copy of your live roster. Model the future by adding scenario headcount, or edit any person's name, dates and salary right in the sheet — nothing here touches the real roster.</p>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-open-add data-dismiss>+ Add scenario headcount</button>
+        <button class="btn ghost" type="button" data-dismiss>I'll edit the sheet</button>
+      </div>
+    </section>
+  </div>` : "";
   const body = html`
+    ${planWelcome}
     <div class="hm-line">Headcount model${extra.dept ? " · " + extra.dept : ""} <span class="muted">${range} · fully loaded (base + ${benefitsPct}% benefits/taxes)</span></div>
     ${dash}
     ${controls}

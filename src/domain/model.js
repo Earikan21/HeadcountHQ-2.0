@@ -17,6 +17,22 @@ export function parseMonth(dateStr) {
   return isNaN(d.getTime()) ? null : { year: d.getFullYear(), month0: d.getMonth() };
 }
 
+/** Days in a calendar month (month0 = 0..11). */
+export const daysInMonth = (year, month0) => new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
+
+/**
+ * Parse a date to {year, month0, day, hasDay}. `hasDay` is false for a bare "YYYY-MM"
+ * (a month with no specific day) so month-level dates aren't accidentally prorated.
+ */
+export function parseDay(dateStr) {
+  if (!dateStr) return null;
+  const s = String(dateStr).trim();
+  const m = s.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
+  if (m) return { year: Number(m[1]), month0: Number(m[2]) - 1, day: m[3] ? Number(m[3]) : 1, hasDay: Boolean(m[3]) };
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : { year: d.getFullYear(), month0: d.getMonth(), day: d.getDate(), hasDay: true };
+}
+
 /** Shift a "YYYY-MM-DD" date by n months (for hiring slippage). Null stays null. */
 function shiftMonthStr(dateStr, n) {
   const p = parseMonth(dateStr);
@@ -73,8 +89,15 @@ export function scenarioEmployees(scenarioHires = []) {
     // Post-migration a hire is exactly one person. `count` only survives for
     // un-migrated JSON; those rows are anonymous, so they get no editable identity.
     const count = Math.max(1, Math.min(200, Number(h.count) || 1));
+    // Scenario windows are month-level: start on the 1st, end on the last day, so a
+    // planned hire is counted for whole months (no accidental day proration).
     const start = h.start_month ? (String(h.start_month).length === 7 ? h.start_month + "-01" : String(h.start_month)) : null;
-    const end = h.end_month ? (String(h.end_month).length === 7 ? h.end_month + "-01" : String(h.end_month)) : null;
+    let end = null;
+    if (h.end_month) {
+      const em = String(h.end_month);
+      if (/^\d{4}-\d{2}$/.test(em)) { const [y, mo] = em.split("-").map(Number); end = `${em}-${String(daysInMonth(y, mo - 1)).padStart(2, "0")}`; }
+      else end = em;
+    }
     const role = h.role || "Scenario hire";
     for (let i = 0; i < count; i++) {
       out.push({
@@ -155,11 +178,23 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
     const loadedMonthly = monthlyBase * ea.mult;
     const monthlyBenefits = loadedMonthly - monthlyBase;
     const inactive = String(e.employment_status || "").toLowerCase() === "inactive";
-    const p = parseMonth(e.start_date);
+    const p = parseDay(e.start_date);
     const hireIdx = p ? absOf(p.year, p.month0) - startAbs : 0;
-    const pe = parseMonth(e.end_date);
+    const pe = parseDay(e.end_date);
     const endIdx = pe ? absOf(pe.year, pe.month0) - startAbs : Infinity;
-    const active = cols.map((c) => (!inactive && c.index >= hireIdx && c.index <= endIdx ? 1 : 0));
+    // A person can start and/or leave partway through a month; pay only the worked
+    // fraction of those boundary months (whole months = 1). Day is honoured only when
+    // the date actually carries one — see parseDay.hasDay.
+    const startFrac = p && p.hasDay ? (daysInMonth(p.year, p.month0) - p.day + 1) / daysInMonth(p.year, p.month0) : 1;
+    const endFrac = pe && pe.hasDay ? pe.day / daysInMonth(pe.year, pe.month0) : 1;
+    const active = cols.map((c) => {
+      if (inactive || c.index < hireIdx || c.index > endIdx) return 0;
+      if (c.index === hireIdx && c.index === endIdx) return Math.max(0, Math.min(1, startFrac + endFrac - 1)); // start & leave same month
+      if (c.index === hireIdx) return startFrac;
+      if (c.index === endIdx) return endFrac;
+      return 1;
+    });
+    const present = active.map((a) => (a > 0 ? 1 : 0)); // headcount is a person, not a fraction
     const monthlyCost = active.map((a, i) => a * loadedMonthly * ea.bonus * (ea.growth ? Math.pow(1 + ea.growth / 100, Math.max(0, cols[i].year - growthBaseYear)) : 1));
     if (ea.costPerHire && p && hireIdx >= 0 && hireIdx < months) monthlyCost[hireIdx] += ea.costPerHire;
     return {
@@ -169,7 +204,9 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
       hireMonthLabel: hireIdx > 0 && hireIdx < months ? cols[hireIdx].fullLabel : (hireIdx <= 0 ? "From start" : "After window"),
       id: e.id != null ? e.id : null, extId: e.employee_ext_id || "",
       hireId: e._hireId || null, overridden: e._overridden || null,
-      startDate: e.start_date || "", endDate: e.end_date || "", scenario: !!e._scenario, active, monthlyCost,
+      loadPct: Math.round((ea.mult - 1) * 1000) / 10, bonusPct: Math.round((ea.bonus - 1) * 1000) / 10,
+      growthPct: ea.growth || 0, costPerHire: ea.costPerHire || 0,
+      startDate: e.start_date || "", endDate: e.end_date || "", scenario: !!e._scenario, active, present, monthlyCost,
     };
   });
   roster.sort((a, b) => a.department.localeCompare(b.department) || a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
@@ -182,7 +219,7 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
   for (const r of roster) for (let i = 0; i < cols.length; i++) {
     deptMonthlyCost[r.department][i] += r.monthlyCost[i];
     totalMonthlyCost[i] += r.monthlyCost[i];
-    monthlyHeadcount[i] += r.active[i];
+    monthlyHeadcount[i] += r.present[i];
   }
 
   // annual summary over each calendar year in the window
