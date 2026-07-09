@@ -13,18 +13,28 @@ import { buildHeadcountModel, deriveWindow } from "../src/domain/model.js";
 // ---- engine ----------------------------------------------------------------
 const emp = (over) => ({ department_name: "Eng", annual_salary: 120000, employment_status: "active", ...over });
 
-test("an end date stops a person's cost after that month, inclusive", () => {
+test("a whole-month end date (last day) keeps that month full, then stops", () => {
   const m = buildHeadcountModel({
-    employees: [emp({ name: "Temp", start_date: "2026-03-01", end_date: "2026-05-01" })],
+    employees: [emp({ name: "Temp", start_date: "2026-03-01", end_date: "2026-05-31" })],
     loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 8, now: new Date("2026-03-15"),
   });
   const r = m.roster[0];
-  assert.deepEqual(r.active, [0, 0, 1, 1, 1, 0, 0, 0], "active only Mar-May");
-  assert.equal(m.monthlyHeadcount[1], 0);
+  assert.deepEqual(r.active, [0, 0, 1, 1, 1, 0, 0, 0], "Mar-May full months");
   assert.equal(m.monthlyHeadcount[4], 1, "May is their last month");
   assert.equal(m.monthlyHeadcount[5], 0, "June: gone");
+  assert.equal(Math.round(m.totalMonthlyCost[4]), 12000); // 120k/12*1.2, full May
   assert.equal(Math.round(m.totalMonthlyCost[5]), 0);
-  assert.equal(Math.round(m.totalMonthlyCost[4]), 12000); // 120k/12*1.2
+});
+
+test("a mid-month end date pays only the worked fraction of that month", () => {
+  const m = buildHeadcountModel({
+    employees: [emp({ name: "Temp", start_date: "2026-03-01", end_date: "2026-05-15" })],
+    loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 6, now: new Date("2026-03-15"),
+  });
+  const r = m.roster[0];
+  assert.equal(r.active[4].toFixed(4), (15 / 31).toFixed(4), "May: 15 of 31 days");
+  assert.equal(Math.round(m.totalMonthlyCost[4]), Math.round(12000 * 15 / 31));
+  assert.equal(m.monthlyHeadcount[4], 1, "still counts as a person that month");
 });
 
 test("an end date before the window means the person never appears", () => {

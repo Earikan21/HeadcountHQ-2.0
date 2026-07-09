@@ -292,3 +292,38 @@ test("the CSV export reflects the plan you're looking at", async () => {
   assert.ok(!/,300000,/.test(actual));
   await admin.post(`/model/versions/${planA}/row/reset`, { key: "emp:E-1" });
 });
+
+test("load is entered as a percentage and stored as a multiplier", async () => {
+  await admin.post(`/model/versions/${planA}/assumptions`, { loaded_pct: "35" });
+  const a = overridesOf; void a;
+  const asm = JSON.parse(srv.db.prepare("SELECT assumptions_json FROM plan_versions WHERE id=?").get(planA).assumptions_json);
+  assert.equal(asm.loadedMultiplier, 1.35, "35% -> x1.35");
+  // 0% is a real value (no load), blank inherits the default
+  await admin.post(`/model/versions/${planA}/assumptions`, { loaded_pct: "0" });
+  assert.equal(JSON.parse(srv.db.prepare("SELECT assumptions_json FROM plan_versions WHERE id=?").get(planA).assumptions_json).loadedMultiplier, 1);
+});
+
+test("a scenario hire can be duplicated (copy inserted after it)", async () => {
+  await admin.post(`/model/versions/${planB}/hire`, { scn_department: "Sales", scn_role: "SDR", scn_start: "2027-06", scn_salary: "90000", scn_count: "1" });
+  let hires = hiresOf(planB);
+  const sdr = hires.find((h) => h.role === "SDR");
+  const res = await admin.post(`/model/versions/${planB}/hire/${sdr.id}/duplicate`, {});
+  assert.equal(res.status, 303);
+  hires = hiresOf(planB);
+  const copies = hires.filter((h) => h.role === "SDR");
+  assert.equal(copies.length, 2, "now two SDRs");
+  assert.ok(copies.some((h) => /\(copy\)$/.test(h.name)), "the copy is named (copy)");
+  assert.notEqual(copies[0].id, copies[1].id, "distinct ids");
+});
+
+test("a real person can be duplicated into a new scenario headcount", async () => {
+  const before = hiresOf(planB).length;
+  const res = await admin.post(`/model/versions/${planB}/emp/E-1/duplicate`, {});
+  assert.equal(res.status, 303);
+  const hires = hiresOf(planB);
+  assert.equal(hires.length, before + 1);
+  const copy = hires[hires.length - 1];
+  assert.match(copy.name, /\(copy\)$/);
+  assert.equal(copy.department, "Engineering", "same department as the source person");
+  assert.ok(copy.start_month, "starts as a new hire (has a start month)");
+});

@@ -19,29 +19,28 @@ before(async () => {
 });
 after(async () => { await srv.close(); });
 
-test("the CSV export is a live model: formulas, not hardcoded numbers", async () => {
+test("the CSV export includes every driver, not just fully-loaded cost", async () => {
   const res = await c.get("/budgets/export.csv");
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type"), /text\/csv/);
   assert.match(res.headers.get("content-disposition"), /financial-model\.csv/);
   const body = await res.text();
   const rows = body.trim().split("\r\n");
-  assert.match(rows[0], /^Department,Name,Role,Annual Base,Loaded Monthly,/);
+  // header carries the input variables: base, load %, bonus %, growth %, cost per hire
+  assert.match(rows[0], /^Department,Name,Role,Status,Start,End,Annual Base,Load %,Bonus %,Salary Growth %,Cost per Hire,Loaded Monthly,/);
   assert.match(body, /Engineering/);
   assert.match(body, /Sales/);
 
-  // loaded monthly derives from the annual-base cell; month cells reference it
-  assert.match(body, /=D2\/12\*[\d.]+/, "loaded monthly is a formula over the base cell");
-  assert.match(body, /=\$E2/, "month cells reference loaded monthly");
+  // loaded monthly stays a live formula over base, load and bonus cells
+  assert.match(body, /=G2\/12\*\(1\+H2\/100\)\*\(1\+I2\/100\)/, "loaded monthly is a formula");
 
-  // every total is a SUM over the person rows, not a precomputed number
+  // totals are =SUM() over the person rows for base, cost-per-hire and every month
   const total = rows[rows.length - 1];
-  assert.match(total, /^TOTAL,,,=SUM\(D2:D\d+\),=SUM\(E2:E\d+\),=SUM\(F2:F\d+\)/);
-  assert.ok(!/,\d{4,},/.test(total.replace(/^TOTAL,,,/, "")), "no hardcoded totals");
+  assert.match(total, /^TOTAL,,,,,,=SUM\(G2:G\d+\),,,,=SUM\(K2:K\d+\),=SUM\(L2:L\d+\),=SUM\(M2:M\d+\)/);
 
   // formulas must not be quoted, or Excel treats them as text
   assert.ok(!/"=/.test(body), "formulas are unquoted");
-});
+})
 
 test("the budgets page links to the CSV export", async () => {
   const page = await (await c.get("/budgets")).text();

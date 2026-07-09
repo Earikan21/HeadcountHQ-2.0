@@ -23,7 +23,9 @@ before(async () => {
     } else if (user.includes("QUESTION:")) {
       text = "You have people across your departments.\nRecommendations:\n- Set a company budget to track runway.";
     } else if (user.includes("Turn this into hires")) {
-      text = JSON.stringify({ hires: [{ department: "Sales", role: "AE", start_month: "2027-06", annual_salary: 120000, count: 2 }] });
+      if (/PAST-TEST/.test(user)) text = JSON.stringify({ hires: [{ department: "Sales", role: "AE", start_month: "2019-01", annual_salary: 120000, count: 1 }] });
+      else if (/ASK-TEST/.test(user)) text = JSON.stringify({ question: "Which department should they go in, and what salary?" });
+      else text = JSON.stringify({ hires: [{ department: "Sales", role: "AE", start_month: "2027-06", annual_salary: 120000, count: 2 }] });
     }
     return { ok: true, json: async () => ({ content: [{ type: "text", text }] }) };
   };
@@ -98,6 +100,28 @@ test("AI adds planned hires to a plan version", async () => {
   const page = await (await c.get("/model?version=" + id)).text();
   assert.match(page, /class="prow scn"/);
   assert.match(page, /AE/);
+});
+
+test("AI never adds a hire in the past — a past start is pulled forward to now", async () => {
+  const c = await loginAda();
+  const id = (await c.post("/model/versions", { name: "No past" })).headers.get("location").match(/version=(\d+)/)[1];
+  await c.post(`/model/versions/${id}/ai`, { description: "hire an AE in Sales PAST-TEST at 120k" });
+  const hires = JSON.parse(srv.db.prepare("SELECT hires_json FROM plan_versions WHERE id=?").get(Number(id)).hires_json);
+  assert.equal(hires.length, 1, "the hire is still added");
+  const now = new Date();
+  const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  assert.ok(hires[0].start_month >= nowMonth, `start ${hires[0].start_month} is not before ${nowMonth}`);
+  assert.ok(!/^(19|20[0-2])/.test(hires[0].start_month) || hires[0].start_month >= nowMonth, "no 2019 start");
+});
+
+test("AI asks a clarifying question and adds nothing when the request is unclear", async () => {
+  const c = await loginAda();
+  const id = (await c.post("/model/versions", { name: "Ask first" })).headers.get("location").match(/version=(\d+)/)[1];
+  const res = await c.post(`/model/versions/${id}/ai`, { description: "hire some people ASK-TEST" });
+  const page = await res.text();
+  assert.match(page, /Which department should they go in/, "the question is shown");
+  const hires = JSON.parse(srv.db.prepare("SELECT hires_json FROM plan_versions WHERE id=?").get(Number(id)).hires_json);
+  assert.equal(hires.length, 0, "nothing was added while it waits for an answer");
 });
 
 test("managers cannot reach the assistant", async () => {

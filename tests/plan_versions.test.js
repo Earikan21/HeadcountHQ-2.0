@@ -102,15 +102,19 @@ test("assumptions can be set per department + editor is collapsible with relocat
   await admin.post(`/model/versions/${id}/assumptions`, { dept: "Engineering", bonus_pct: "20" });
   const stored = JSON.parse(srv.db.prepare("SELECT assumptions_json FROM plan_versions WHERE id=?").get(Number(id)).assumptions_json);
   assert.equal(stored.byDept.Engineering.bonusPct, 20);
-  // scoped editor shows the override UI + collapsible sections + relocated search
+  // scoped editor: an inline department dropdown, an open-by-default assumptions strip,
+  // and a prominent "add scenario headcount" button.
   const page = await (await admin.get(`/model?version=${id}&dept=Engineering`)).text();
-  assert.match(page, /Overrides for Engineering/);
-  assert.match(page, /class="plan-sect"/);
-  assert.match(page, /<summary>Hires/);
-  // both sections are collapsed by default (no `open` attribute anywhere)
-  assert.ok(!/<details class="plan-sect" open>/.test(page), "hires + assumptions start collapsed");
-  // search now lives in the single control row, not its own strip
-  assert.ok(!/class="model-search"/.test(page), "the separate search row is gone");
+  assert.match(page, /blank fields fall back to the company default/);
+  assert.match(page, /id="asm-dept"/, "department dropdown lives inside the assumptions section");
+  assert.match(page, /<details class="asm-sect" open>/, "assumptions open by default");
+  assert.match(page, /Add scenario headcount/);
+  assert.match(page, /class="add-scn"/);
+  assert.ok(!/<details class="add-scn" open>/.test(page), "the add-headcount section is collapsed by default");
+  // load is entered as a percentage now, not a decimal multiplier
+  assert.match(page, /name="loaded_pct"/);
+  assert.ok(!/name="loaded_mult"/.test(page));
+  // search still lives in the single control row
   assert.match(page, /class="model-controls"[\s\S]*?id="f-search"/);
 });
 
