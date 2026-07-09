@@ -121,3 +121,30 @@ test("a client can view the model (read-only, no admin controls)", async () => {
   assert.ok(!page.includes("/roster/duplicate/"), "client sees no duplicate controls");
   assert.ok(!page.includes('href="/roster/new"'), "client sees no add-person control");
 });
+
+test("fully-loaded cost is editable on the Actual view and recomputes the model", async () => {
+  const page = await (await admin.get("/model")).text();
+  assert.match(page, /action="\/model\/load"/, "the load control shows on Actual");
+  assert.match(page, /name="load_pct"/);
+
+  await admin.post("/model/load", { load_pct: "40", period: "month" });
+  const mult = srv.db.prepare("SELECT loaded_cost_multiplier m FROM workspace_settings WHERE workspace_id=1").get().m;
+  assert.equal(mult, 1.4, "40% -> x1.40 workspace-wide");
+  const after = await (await admin.get("/model")).text();
+  assert.match(after, /base \+ 40% benefits/, "the header reflects the new load");
+  assert.match(after, /name="load_pct"[^>]*value="40"/);
+});
+
+test("a client cannot change the workspace loaded cost", async () => {
+  const created = await admin.post("/accounts", { name: "Cli", email: `cli${Math.random().toString(16).slice(2,6)}@x.co`, role: "client", method: "password" });
+  const pw = (await created.text()).match(/<code>([^<]+)<\/code>/)[1];
+  const email = srv.db.prepare("SELECT email FROM users WHERE name='Cli' ORDER BY id DESC LIMIT 1").get().email;
+  const client = makeClient(srv.base);
+  await client.get("/login"); await client.post("/login", { email, password: pw });
+  const before = srv.db.prepare("SELECT loaded_cost_multiplier m FROM workspace_settings WHERE workspace_id=1").get().m;
+  const res = await client.post("/model/load", { load_pct: "99" });
+  assert.equal(res.status, 403);
+  assert.equal(srv.db.prepare("SELECT loaded_cost_multiplier m FROM workspace_settings WHERE workspace_id=1").get().m, before, "unchanged");
+  // and a client never sees the control
+  assert.ok(!/action="\/model\/load"/.test(await (await client.get("/model")).text()));
+});
