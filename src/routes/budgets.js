@@ -379,7 +379,13 @@ export function registerBudgetRoutes(router) {
       // Real per-department pay, so "pay them the department average" resolves to an
       // actual figure rather than a number the model invents.
       const payStats = departmentPayStats(listEmployees(ctx.db, {}));
-      const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), payStats, client });
+      const now = new Date();
+      const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), payStats, now, client });
+      // If the assistant needs clarification, surface its question and add nothing.
+      if (parsed.question) {
+        return renderModel(ctx, plan.id, { aiAsk: parsed.question });
+      }
       // Data validation before instating: if the AI couldn't pin down the essentials,
       // ask for them rather than inventing a hire.
       if (!parsed.length) {
@@ -405,7 +411,7 @@ export function registerBudgetRoutes(router) {
           hires.push({
             id: nextHireId(hires), department: h.department || "(scenario)", role,
             name: count > 1 ? `${role} ${i + 1}` : role,
-            start_month: h.start_month || null, end_month: h.end_month || null,
+            start_month: h.start_month || nowMonth, end_month: h.end_month || null,
             annual_salary: Number(h.annual_salary) || 0,
           });
         }

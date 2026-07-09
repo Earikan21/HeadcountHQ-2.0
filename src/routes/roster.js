@@ -250,14 +250,10 @@ export function registerRosterRoutes(router) {
     if (!requirePermission(ctx, canImportRoster)) return;
     const batch = getBatch(ctx.db, Number(ctx.params.id));
     if (!batch || batch.status !== "draft") return ctx.redirect("/roster/import");
-    const FIXABLE = new Set(["department", "job_title", "employee_type", "employment_status", "compensation_unit", "manager"]);
     const mapping = {};
     for (const f of R.SCHEMA) {
       const v = ctx.body[`map_${f.key}`] || "";
-      if (v && batch.headers.includes(v)) { mapping[f.key] = v; continue; }
-      // No column? Allow a manually-assigned fixed value for the categorical fields.
-      const fixed = FIXABLE.has(f.key) ? String(ctx.body[`fix_${f.key}`] || "").trim() : "";
-      mapping[f.key] = fixed ? { value: fixed } : null;
+      mapping[f.key] = v && batch.headers.includes(v) ? v : null;
     }
     const missing = R.mappingProblems(mapping);
     if (missing.length) {
@@ -453,19 +449,12 @@ function mapPage(ctx, { batch, errors }) {
     .join(""));
   const rows = R.SCHEMA.map((f) => {
     const conf = confidence[f.key];
-    const isFixed = batch.mapping[f.key] && typeof batch.mapping[f.key] === "object";
-    const badge = isFixed ? '<span class="badge b-high">Assigned</span>'
-      : !batch.mapping[f.key] ? '<span class="badge b-none">Unmapped</span>'
+    const badge = !batch.mapping[f.key] ? '<span class="badge b-none">Unmapped</span>'
       : conf === "high" ? '<span class="badge b-high">Matched</span>'
       : conf === "low" ? '<span class="badge b-low">Check this</span>' : '<span class="badge b-high">Set</span>';
-    const FIXABLE = new Set(["department", "job_title", "employee_type", "employment_status", "compensation_unit", "manager"]);
-    const fixVal = (batch.mapping[f.key] && typeof batch.mapping[f.key] === "object") ? batch.mapping[f.key].value : "";
     return html`<div class="map-row">
       <div class="canon">${f.label} ${f.required ? raw('<span class="req">*</span>') : ""}</div>
-      <div class="map-pick">
-        <select name="map_${f.key}">${opts(f.key)}</select>
-        ${FIXABLE.has(f.key) ? html`<input class="map-fix" name="fix_${f.key}" placeholder="or set all rows to…" value="${fixVal}" aria-label="Fixed ${f.label} for all rows">` : ""}
-      </div>
+      <select name="map_${f.key}">${opts(f.key)}</select>
       <div>${raw(badge)}</div>
     </div>`;
   });

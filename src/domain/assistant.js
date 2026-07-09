@@ -128,45 +128,52 @@ function resolveSalaryBasis(basis, deptName, payStats) {
  * number in the text is still honoured; the basis only fills the salary when the user
  * asked for a statistic.
  */
-export async function parseScenarioHires({ description, departments = [], payStats = null, client }) {
+export async function parseScenarioHires({ description, departments = [], payStats = null, now = new Date(), client }) {
   if (!client || !client.configured) throw new Error("Assistant not configured.");
+  const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const statLine = payStats && payStats.departments && payStats.departments.length
     ? "Department pay (annual base, from the roster): " +
       payStats.departments.map((d) => `${d.name} avg ${d.avg}, median ${d.median}, range ${d.min}-${d.max} (n=${d.count})`).join("; ") +
       `. Company avg ${payStats.company.avg}, median ${payStats.company.median}.`
     : "Department pay figures are unavailable.";
   const system =
-    "You convert a hiring what-if described in plain English into structured hires. " +
-    "Respond with a SINGLE JSON object of the form " +
-    '{"hires":[{"department":"","role":"","start_month":"YYYY-MM","annual_salary":0,"salary_basis":null,"count":1}]} ' +
-    "and nothing else (no prose, no markdown).";
+    "You convert a hiring what-if described in plain English into structured hires for a forward-looking plan. " +
+    'Respond with a SINGLE JSON object, either {"hires":[{"department":"","role":"","start_month":"YYYY-MM","annual_salary":0,"salary_basis":null,"count":1}]} ' +
+    'OR, when the request is ambiguous or missing key details, {"question":"<one short clarifying question>"}. Nothing else (no prose, no markdown).';
   const user =
 `Known departments: ${departments.join(", ") || "(none)"}
 ${statLine}
+The current month is ${nowMonth}.
 
 Turn this into hires: ${str(description, 500)}
 
 Rules:
-- start_month must be "YYYY-MM" (or null if unspecified).
-- count is an integer (default 1).
-- Prefer an existing department name when the text clearly matches one.
+- start_month must be "YYYY-MM", and it must be ${nowMonth} or LATER — never earlier. Plans only project forward from today; you cannot hire in the past. Use null if the timing is unspecified.
+- If the user asks to start someone in the past, or the timing/department/count/salary is unclear or missing, do NOT guess. Return {"question":"..."} with a single clarifying question and no hires.
+- count is an integer (default 1). Prefer an existing department name when the text clearly matches one.
 - Salary: if the text gives an explicit amount, put that plain number (no $ or commas) in "annual_salary" and leave "salary_basis" null. Salaries are ANNUAL — multiply a monthly figure by 12.
-- If instead the pay should follow a department or company statistic (e.g. "the department average", "median pay", "top of the band"), set "annual_salary" to 0 and set "salary_basis" to exactly one of: ${SALARY_BASES.join(", ")}. Do NOT try to compute the number yourself — the system fills it from the figures above.`;
+- If instead the pay should follow a department or company statistic (e.g. "the department average", "median pay", "top of the band"), set "annual_salary" to 0 and set "salary_basis" to exactly one of: ${SALARY_BASES.join(", ")}. Do NOT compute the number yourself — the system fills it from the figures above.`;
   const text = await client.chat(system, user, 2000);
   const obj = parseJsonObject(text);
-  const hires = Array.isArray(obj.hires) ? obj.hires : [];
-  return hires.map((h) => {
+  const rawHires = Array.isArray(obj.hires) ? obj.hires : [];
+  const hires = rawHires.map((h) => {
     const department = String(h.department || "").slice(0, 60).trim() || "(scenario)";
     const basis = SALARY_BASES.includes(String(h.salary_basis || "").toLowerCase()) ? String(h.salary_basis).toLowerCase() : null;
     const explicit = Number(h.annual_salary) || 0;
-    // An explicit number wins; a cited basis is resolved from the real roster stats.
     const annual_salary = explicit > 0 ? explicit : (basis ? resolveSalaryBasis(basis, department, payStats) : 0);
+    const sm = String(h.start_month || "");
+    // Never accept a start in the past — plans only project forward.
+    const start_month = /^\d{4}-\d{2}$/.test(sm) && sm >= nowMonth ? sm : null;
     return {
       department,
       role: String(h.role || "Scenario hire").slice(0, 60).trim(),
-      start_month: /^\d{4}-\d{2}$/.test(String(h.start_month || "")) ? h.start_month : null,
+      start_month,
       annual_salary: Math.round(annual_salary),
       count: Math.max(1, Math.min(200, Number(h.count) || 1)),
     };
   }).filter((h) => h.annual_salary > 0);
+  // Arrays are objects: carry a clarifying question alongside (route asks before adding).
+  const question = typeof obj.question === "string" ? obj.question.trim().slice(0, 240) : "";
+  if (question) hires.question = question;
+  return hires;
 }

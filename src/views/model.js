@@ -331,20 +331,7 @@ export function financialModelPage(ctx, model, extra = {}) {
   })() : "";
 
   const range = cols.length ? `${cols[0].fullLabel} – ${cols[cols.length - 1].fullLabel}` : "";
-  // First time this plan is opened, prompt the user to set headcount (JS decides
-  // whether to show it, per-plan, via localStorage).
-  const planWelcome = editable ? html`<div id="plan-welcome" class="modal-scrim" hidden>
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="pw-h">
-      <h2 id="pw-h">Plan “${extra.current.name}”</h2>
-      <p class="muted small">This plan starts as an exact copy of your live roster. Model the future by adding scenario headcount, or edit any person's name, dates and salary right in the sheet — nothing here touches the real roster.</p>
-      <div class="modal-actions">
-        <button class="btn" type="button" data-open-add data-dismiss>+ Add scenario headcount</button>
-        <button class="btn ghost" type="button" data-dismiss>I'll edit the sheet</button>
-      </div>
-    </section>
-  </div>` : "";
   const body = html`
-    ${planWelcome}
     <div class="hm-line">Headcount model${extra.dept ? " · " + extra.dept : ""} <span class="muted">${range} · fully loaded (base + ${benefitsPct}% benefits/taxes)</span></div>
     ${dash}
     ${controls}

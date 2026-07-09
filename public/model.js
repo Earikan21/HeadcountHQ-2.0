@@ -309,28 +309,4 @@
       if (warnings.length && !window.confirm(warnings.join("\n") + "\n\nAdd it anyway?")) ev.preventDefault();
     });
   });
-
-  // ---- first time a plan is opened: prompt to set headcount ----
-  (function firstOpenPrompt() {
-    var version = sheet.getAttribute("data-version");
-    if (!version || sheet.getAttribute("data-editable") !== "1") return;
-    var scrim = document.getElementById("plan-welcome");
-    if (!scrim) return;
-    var seen = false;
-    try { seen = (localStorage.getItem("hq_plan_seen_" + version) === "1"); } catch (e) {}
-    if (seen) { if (scrim.parentNode) scrim.parentNode.removeChild(scrim); return; }
-    scrim.hidden = false;
-    function dismiss() {
-      try { localStorage.setItem("hq_plan_seen_" + version, "1"); } catch (e) {}
-      scrim.hidden = true;
-    }
-    Array.prototype.forEach.call(scrim.querySelectorAll("[data-dismiss]"), function (b) { b.addEventListener("click", dismiss); });
-    scrim.addEventListener("click", function (e) { if (e.target === scrim) dismiss(); });
-    var add = scrim.querySelector("[data-open-add]");
-    if (add) add.addEventListener("click", function () {
-      var det = document.querySelector("details.add-scn");
-      if (det) { det.open = true; det.scrollIntoView({ behavior: "smooth", block: "center" }); }
-      dismiss();
-    });
-  })();
 })();
