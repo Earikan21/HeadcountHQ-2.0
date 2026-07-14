@@ -178,6 +178,36 @@ function rowActions(ctx, r, extra, { isAdmin, editable, key }) {
   </td>`;
 }
 
+/** "Link to Excel" popup — the Power Query URL for THIS view (Actual or one plan). */
+function excelLinkModal(ctx, extra) {
+  if (!extra.canEdit) return "";
+  const base = extra.publicUrl || "https://your-host";
+  const token = extra.exportToken;
+  const scope = extra.current ? `the plan “${extra.current.name}”` : "your live model (Actual)";
+  const url = token ? `${base}/export/model.csv?token=${token}${extra.current ? "&version=" + extra.current.id : ""}` : "";
+  const setup = token
+    ? html`<label>Power Query URL for ${scope}
+        <input type="text" class="mono" value="${url}" readonly onclick="this.select()" aria-label="Power Query URL" style="width:100%">
+      </label>
+      <p class="muted small">Rotate or disable this link under <a href="/integrations/excel">Admin → Link to Excel</a>.</p>`
+    : html`<p class="muted small">First, create a private link (a token). You do this once — then Actual and every plan each have their own URL.</p>
+      <form method="post" action="/integrations/excel/token/ensure" class="inline">${csrfField(ctx)}<input type="hidden" name="return" value="${extra.current ? "/model?version=" + extra.current.id : "/model"}"><button class="btn" type="submit">Create link</button></form>`;
+  return html`<div id="excel-link-modal" class="modal-scrim" hidden>
+    <section class="modal wide" role="dialog" aria-modal="true" aria-labelledby="xl-h">
+      <h2 id="xl-h">Link to Excel</h2>
+      <p class="muted small">Pull ${scope} into Excel with Power Query. It refreshes on demand, and any tab that links to the loaded table recalculates. One-way — the tool stays the source of truth.</p>
+      ${setup}
+      <ol class="twofa-steps" style="margin:12px 0 0">
+        <li>In Excel: <b>Data → Get Data → From Other Sources → From Web</b> (or <b>Data → From Web</b>).</li>
+        <li>Paste the URL, choose <b>Anonymous</b> if asked, then <b>Load</b>.</li>
+        <li>Link your other tabs to that table with formulas (SUMIFS, XLOOKUP) or a PivotTable.</li>
+        <li>Update anytime: <b>Data → Refresh All</b>, or set auto-refresh in Query → Properties.</li>
+      </ol>
+      <div class="modal-actions"><button class="btn ghost" type="button" data-close-modal>Done</button></div>
+    </section>
+  </div>`;
+}
+
 export function financialModelPage(ctx, model, extra = {}) {
   const { cols, roster, departments, deptMonthlyCost, totalMonthlyCost, monthlyHeadcount, benefitsPct, years } = model;
   const isAdmin = canImportRoster(ctx.user);
@@ -219,6 +249,7 @@ export function financialModelPage(ctx, model, extra = {}) {
     <span class="zoomctl"><button id="zoom-out" type="button" aria-label="Zoom out">&minus;</button><span id="zoom-lvl">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button></span>
     <span class="spacer"></span>
     ${editable ? raw('<span id="save-pill" class="save-pill" role="status" aria-live="polite" hidden></span>') : ""}
+    ${extra.canEdit ? raw('<button type="button" class="btn ghost sm" data-open-modal="excel-link">Link to Excel</button>') : ""}
     <a class="btn ghost sm" href="${q("/budgets/export.csv")}">Export CSV</a>
   </div>`;
 
@@ -353,6 +384,7 @@ export function financialModelPage(ctx, model, extra = {}) {
     ${planEditor(ctx, extra)}
     ${editable ? html`<input type="hidden" id="model-csrf" value="${ctx.csrf}">
       <p class="muted small edit-hint">Editing <b>${extra.current.name}</b>. Name, start, end and salary save as you go, and change only this plan — the roster stays as imported. <b>Reset</b> puts a person back to their real values.</p>` : ""}
+    ${excelLinkModal(ctx, extra)}
     <div class="sheet-wrap">${rosterTable}</div>
     ${summary}
     <script src="/static/model.js" defer></script>`;

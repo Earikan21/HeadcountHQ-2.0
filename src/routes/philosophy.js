@@ -116,7 +116,7 @@ function page(ctx) {
     <div class="pagehead">
       <h1>Headcount philosophy</h1>
       <p class="muted">The rules of the game — set these <b>before</b> modeling. Everything downstream
-      (seats, requests, dashboards, runway) reads from here. Phase &amp; industry only suggest
+      (seats, requests, dashboards) read from here. Phase &amp; industry only suggest
       starting points; you have direct control over every value.</p>
     </div>
 

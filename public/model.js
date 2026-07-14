@@ -309,4 +309,27 @@
       if (warnings.length && !window.confirm(warnings.join("\n") + "\n\nAdd it anyway?")) ev.preventDefault();
     });
   });
+
+  // ---- popups (data-open-modal="X" opens #X-modal; scrim/close/Esc dismiss) ----
+  Array.prototype.forEach.call(document.querySelectorAll("[data-open-modal]"), function (btn) {
+    btn.addEventListener("click", function () {
+      var name = btn.getAttribute("data-open-modal");
+      var m = document.getElementById(name + "-modal") || document.getElementById(name);
+      if (m) m.hidden = false;
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".modal-scrim"), function (scrim) {
+    scrim.addEventListener("click", function (e) { if (e.target === scrim) scrim.hidden = true; });
+    Array.prototype.forEach.call(scrim.querySelectorAll("[data-close-modal]"), function (b) {
+      b.addEventListener("click", function () { scrim.hidden = true; });
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") Array.prototype.forEach.call(document.querySelectorAll(".modal-scrim:not([hidden])"), function (m) { m.hidden = true; });
+  });
+  // Reopen the Excel-link popup after creating a token (the ensure route adds ?excel=1).
+  if (/[?&]excel=1(&|$)/.test(window.location.search)) {
+    var xl = document.getElementById("excel-link-modal");
+    if (xl) { xl.hidden = false; var f = xl.querySelector("input.mono"); if (f) f.select && f.select(); }
+  }
 })();

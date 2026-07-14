@@ -77,6 +77,15 @@ export function loadConfig(env = process.env) {
   const AI_IMPORT_MODEL = (env.AI_IMPORT_MODEL || "").trim() ||
     DEFAULT_MODELS[AI_IMPORT_PROVIDER] || DEFAULT_MODELS.anthropic;
 
+  // Excel Online (Microsoft 365) live link via Microsoft Graph. Delegated OAuth.
+  // With no client id/secret the integration is simply unavailable (routes show a
+  // "set this up" state). The redirect URI defaults from PUBLIC_URL if not given.
+  const MSFT_CLIENT_ID = (env.MSFT_CLIENT_ID || "").trim();
+  const MSFT_CLIENT_SECRET = (env.MSFT_CLIENT_SECRET || "").trim();
+  const MSFT_TENANT = (env.MSFT_TENANT || "common").trim();
+  const PUBLIC_URL = (env.PUBLIC_URL || "").trim().replace(/\/$/, "");
+  const MSFT_REDIRECT_URI = (env.MSFT_REDIRECT_URI || (PUBLIC_URL ? PUBLIC_URL + "/integrations/excel/callback" : "")).trim();
+
   if (SESSION_SECRET.length < 16) {
     errors.push("SESSION_SECRET must be set to at least 16 characters.");
   }
@@ -107,6 +116,8 @@ export function loadConfig(env = process.env) {
     AI_IMPORT_BASE_URL,
     AI_IMPORT_MODEL,
     aiImportConfigured: AI_IMPORT_API_KEY.length > 0,
+    MSFT_CLIENT_ID, MSFT_CLIENT_SECRET, MSFT_TENANT, MSFT_REDIRECT_URI, PUBLIC_URL,
+    excelSyncConfigured: MSFT_CLIENT_ID.length > 0 && MSFT_CLIENT_SECRET.length > 0,
     // Feature flags (Directive 4.0). Hidden areas default OFF for the internal tool;
     // re-enable per area with FEATURE_<AREA>=true. See src/features.js.
     features: resolveFeatures(env),

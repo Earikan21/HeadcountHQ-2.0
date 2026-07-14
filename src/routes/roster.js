@@ -632,7 +632,7 @@ function onboardPage(ctx, { form, seat, errors }) {
           <label>Amount<input name="comp_amount" value="${esc(form.comp_amount || "")}" placeholder="e.g. 150000 or 95k" required></label>
           <label>Per<select name="comp_unit">${UNITS.map(([v, l]) => html`<option value="${v}" ${opt(v, form.comp_unit)}>${l}</option>`)}</select></label>
         </div>
-        <p class="muted small">Converted to an annual, fully-loaded figure for budgets and runway.</p>
+        <p class="muted small">Converted to an annual, fully-loaded figure for budgets and the cost model.</p>
       </section>
       <button class="btn" type="submit">${seat ? "Onboard &amp; fill seat" : "Add person"}</button>
     </form>`;

@@ -626,4 +626,45 @@ export const MIGRATIONS = [
       db.exec(`ALTER TABLE sessions ADD COLUMN mfa_pending INTEGER NOT NULL DEFAULT 0;`);
     },
   },
+  {
+    name: "2026_07_09_028_excel_connection",
+    up(db) {
+      // One-way live link to a Microsoft 365 workbook. One connection per workspace.
+      // The refresh token is stored ENCRYPTED (see auth/secretbox.js); never plaintext.
+      db.exec(`
+        CREATE TABLE excel_connections (
+          workspace_id      INTEGER PRIMARY KEY DEFAULT 1,
+          account_email     TEXT,
+          refresh_token_enc TEXT,
+          drive_id          TEXT,
+          item_id           TEXT,
+          workbook_name     TEXT,
+          worksheet         TEXT NOT NULL DEFAULT 'HeadcountModel',
+          status            TEXT NOT NULL DEFAULT 'connected',
+          last_pushed_at    TEXT,
+          last_error        TEXT,
+          created_by        INTEGER,
+          created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
+  {
+    name: "2026_07_09_029_power_query_export",
+    up(db) {
+      // Switched from a Graph push to a Power Query PULL: Excel refreshes from a
+      // token-authed export URL. The old excel_connections table is LEFT in place so the
+      // Graph-push path (routes/excel_graph.js, dormant) can be re-enabled if wanted.
+      db.exec(`
+        CREATE TABLE export_tokens (
+          workspace_id INTEGER PRIMARY KEY DEFAULT 1,
+          token        TEXT NOT NULL,
+          created_by   INTEGER,
+          created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          last_used_at TEXT
+        );
+      `);
+    },
+  },
 ];

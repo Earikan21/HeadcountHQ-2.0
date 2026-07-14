@@ -7,7 +7,6 @@ import { headcountRollup } from "../repos/seats.js";
 import { getDepartmentTargets } from "../repos/targets.js";
 import { listEmployees } from "../repos/roster.js";
 import { allReconciliation } from "../repos/budgets.js";
-import { getFinancials } from "../repos/planning.js";
 import { mixVsTarget } from "../domain/philosophy.js";
 import { clientFromConfig, answerQuestion } from "../domain/assistant.js";
 import { logAudit } from "../repos/audit.js";
@@ -21,7 +20,7 @@ const assistReady = (ctx) => Boolean(ctx.config.aiImportConfigured);
 const QUICK = [
   ["Recommend the top 3 things we should improve about our headcount plan right now.", "Recommend improvements"],
   ["Which departments are over or under their target balance, and what should we do about it?", "Over / under target?"],
-  ["What are our biggest budget or runway risks given the current plan?", "Budget & runway risks"],
+  ["What are our biggest budget risks given the current plan?", "Budget risks"],
 ];
 
 export function registerAssistantRoutes(router) {
@@ -69,8 +68,8 @@ export function registerAssistantRoutes(router) {
 
 /**
  * Assemble AGGREGATE context for the assistant: department counts, target mix,
- * company budgets, and runway. Deliberately excludes individual names and
- * salaries — only totals and per-department roll-ups are included.
+ * and company budgets. Deliberately excludes individual names and salaries — only
+ * totals and per-department roll-ups are included.
  */
 export function buildAssistantContext(db) {
   const s = getSettings(db);
@@ -78,11 +77,10 @@ export function buildAssistantContext(db) {
   const targets = getDepartmentTargets(db);
   const emps = listEmployees(db, {});
   const rec = allReconciliation(db);
-  const fin = getFinancials(db);
 
   // Pre-computed background analytics (per-department averages, ranges, ratios,
   // multiples, tenure, multi-year model) — the single source the assistant reads.
-  const metrics = computeMetrics({ employees: emps, settings: s, rollup: roll, reconciliation: rec, financials: fin, now: new Date() });
+  const metrics = computeMetrics({ employees: emps, settings: s, rollup: roll, reconciliation: rec, now: new Date() });
 
   // department mix vs the target balance (philosophy)
   const actualByDept = {}; for (const d of roll.departments) actualByDept[d.department] = d.active;
@@ -101,7 +99,7 @@ export function buildAssistantContext(db) {
     mixLines ? `Department headcount mix vs target:\n${mixLines}` : ``,
     planNames.length ? `Saved plan versions: ${planNames.join(", ")}.` : ``,
     ``,
-    `Everything above is pre-computed aggregate analytics (averages, medians, ranges, ratios, multiples, per-department breakdowns, budgets, runway, and the multi-year model). Answer directly from it. You do NOT have individual salaries tied to a specific person's name — decline only that.`,
+    `Everything above is pre-computed aggregate analytics (averages, medians, ranges, ratios, multiples, per-department breakdowns, budgets, and the multi-year model). Answer directly from it. You do NOT have individual salaries tied to a specific person's name — decline only that.`,
   ].join("\n");
 }
 function page(ctx, { question, answer, error }) {
@@ -121,7 +119,7 @@ function page(ctx, { question, answer, error }) {
   const body = html`
     <div class="pagehead"><h1>Assistant</h1>
       <p class="muted">Ask about your headcount, budget, and plan — and get recommendations. It reads
-      <b>aggregate</b> figures only (department counts, targets, budgets, runway) — never individual salaries or names.</p>
+      <b>aggregate</b> figures only (department counts, targets, budgets) — never individual salaries or names.</p>
     </div>
     ${ready ? "" : html`<div class="flash warn">The assistant is currently off. A Finance Admin can turn it on under <a href="/philosophy">Philosophy → AI assistant</a> (a provider key must be configured).</div>`}
     <section class="card">

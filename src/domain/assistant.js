@@ -89,7 +89,7 @@ export async function answerQuestion({ question, context, client }) {
     "user's question using ONLY the DATA provided — never invent numbers. Be concise " +
     "and specific, citing the actual figures. Then, when the data supports it, add a " +
     "short 'Recommendations' section with 1-3 concrete, actionable suggestions " +
-    "(e.g. which departments are over/under target, budget or runway risks, what to " +
+    "(e.g. which departments are over/under target, budget risks, what to " +
     "prioritize). If the data doesn't contain the answer, say so plainly. Keep total " +
     "response under ~200 words. Plain text, not markdown tables.";
   const user = `DATA:\n${str(context, 6000)}\n\nQUESTION: ${str(question, 500)}`;

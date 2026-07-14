@@ -47,7 +47,7 @@ export function departmentPayStats(employees = []) {
   };
 }
 
-export function computeMetrics({ employees = [], settings = {}, rollup = { totals: {}, departments: [] }, reconciliation = null, financials = null, now = new Date() } = {}) {
+export function computeMetrics({ employees = [], settings = {}, rollup = { totals: {}, departments: [] }, reconciliation = null, now = new Date() } = {}) {
   const mult = Number(settings.loaded_cost_multiplier) || 1.2;
   const nowMs = now.getTime();
 
@@ -111,9 +111,6 @@ export function computeMetrics({ employees = [], settings = {}, rollup = { total
     moneyCommitted: reconciliation.company.money.committed,
   } : null;
 
-  const runwayMonths = financials && Number(financials.monthly_burn) > 0 ? Math.floor(Number(financials.cash_balance) / Number(financials.monthly_burn)) : null;
-  const fin = financials ? { cash: Number(financials.cash_balance) || 0, monthlyBurn: Number(financials.monthly_burn) || 0, runwayMonths } : null;
-
   let model = null;
   try {
     const m = buildHeadcountModel({ employees, loadedMultiplier: mult, now });
@@ -131,7 +128,7 @@ export function computeMetrics({ employees = [], settings = {}, rollup = { total
     };
   } catch { /* ignore */ }
 
-  return { company, departments, ratios, budget, financials: fin, model, computedAt: now.toISOString() };
+  return { company, departments, ratios, budget, model, computedAt: now.toISOString() };
 }
 
 /** Render metrics as a compact text block for the assistant context. */
@@ -152,7 +149,6 @@ export function metricsText(m) {
     L.push(`Fully-loaded cost by year: ${m.model.costByYear.map((y) => `${y.year} ${money(y.totalLoaded)} (${y.yearEndHeadcount} EOY, ${money(y.avgCostPerHead)}/head)`).join("; ")}.`);
   }
   if (m.budget) L.push(`Budget: headcount cap ${m.budget.headcountCap || "not set"} (allocated ${m.budget.headcountAllocated}); money cap ${m.budget.moneyCap ? money(m.budget.moneyCap) : "not set"}, committed ${money(m.budget.moneyCommitted)}.`);
-  if (m.financials) L.push(`Cash ${money(m.financials.cash)}, monthly burn ${money(m.financials.monthlyBurn)}, runway ${m.financials.runwayMonths != null ? m.financials.runwayMonths + " months" : "n/a"}.`);
   L.push(`Ratios & multiples: loaded/base x${m.ratios.loadedToBaseMultiple}; avg-salary spread across depts ${m.ratios.avgSalaryRangeMultiple != null ? m.ratios.avgSalaryRangeMultiple + "x" : "n/a"}; largest dept = ${m.ratios.largestDeptShareOfCostPct}% of base cost; seats filled ${m.ratios.activeToApprovedPct != null ? m.ratios.activeToApprovedPct + "%" : "n/a"} of approved.`);
   L.push(`Per department — headcount / % HC / avg base / median / range / % of cost / index vs co avg / loaded per head / avg tenure:`);
   for (const d of m.departments) {

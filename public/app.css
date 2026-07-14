@@ -658,3 +658,7 @@ details.asm-sect:not([open]) > summary::before { content: "▸"; }
 .load-control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; }
 .load-control label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 600; }
 .load-control input { width: 72px; height: 30px; padding: 4px 8px; }
+
+/* Wider modal for the Excel-link popup (holds a full URL). */
+.modal.wide { max-width: 560px; }
+.modal.wide .mono { font-size: 12px; }

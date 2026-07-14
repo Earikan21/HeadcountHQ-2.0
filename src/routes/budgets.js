@@ -12,6 +12,8 @@ import { getSettings, updateSettings } from "../repos/settings.js";
 import { financialModelPage } from "../views/model.js";
 import { buildHeadcountModel, applyPlanOverrides, periodBuckets, periodize, yearGroupsOf, modelKpis, windowKey } from "../domain/model.js";
 import { alignedWindow, comparePlans } from "../domain/compare.js";
+import { modelMatrixCells } from "../domain/model_export.js";
+import { getToken as getExportToken } from "../repos/export_tokens.js";
 import { comparePage } from "../views/compare.js";
 import { listEmployees } from "../repos/roster.js";
 import { clientFromConfig, parseScenarioHires } from "../domain/assistant.js";
@@ -50,6 +52,10 @@ export function registerBudgetRoutes(router) {
       canEdit: canSetBudgets(ctx.user),
       // The sheet is editable only inside a plan, and only for someone who may edit it.
       editable: Boolean(current) && canSetBudgets(ctx.user),
+      // Excel live-link context: the export token + public base so a "Link to Excel"
+      // popup can show the pull URL for this exact view (Actual or a specific plan).
+      exportToken: canSetBudgets(ctx.user) ? (getExportToken(ctx.db)?.token || null) : null,
+      publicUrl: ctx.config.PUBLIC_URL || "",
       aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
     }));
   };
@@ -513,33 +519,9 @@ function csvCell(v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/
  * and every total is a `=SUM(...)` over the person rows.
  */
 export function modelToFormulaCsv(model) {
-  const { cols, roster } = model;
-  // Every driver that feeds the model, not just the fully-loaded output.
-  const fixed = ["Department", "Name", "Role", "Status", "Start", "End",
-    "Annual Base", "Load %", "Bonus %", "Salary Growth %", "Cost per Hire", "Loaded Monthly"];
-  const header = fixed.concat(cols.map((c) => c.fullLabel));
-  const lines = [header.map(csvCell).join(",")];
-  const first = 2;                 // row 1 is the header
-  const MONTH0 = fixed.length;     // 0-based column index of the first month
-  roster.forEach((r, i) => {
-    const row = first + i;
-    // Loaded monthly stays live: recomputes from base, load and bonus cells.
-    const loaded = "=G" + row + "/12*(1+H" + row + "/100)*(1+I" + row + "/100)";
-    const months = r.monthlyCost.map((v) => Math.round(v)); // includes proration, growth & one-time cost
-    lines.push([
-      csvCell(r.department), csvCell(r.name || ""), csvCell(r.role || ""), csvCell(r.status || ""),
-      csvCell(r.startDate || ""), csvCell(r.endDate || ""),
-      Math.round(r.annualBase), r.loadPct, r.bonusPct, r.growthPct, Math.round(r.costPerHire), loaded,
-    ].concat(months).join(","));
-  });
-  const last = first + roster.length - 1;
-  const sum = (L) => (roster.length ? "=SUM(" + L + first + ":" + L + last + ")" : "0");
-  const totals = ["TOTAL", "", "", "", "", "", sum("G"), "", "", "", sum("K"), sum("L")]
-    .concat(cols.map((c, j) => sum(colLetter(MONTH0 + j))));
-  lines.push(totals.map(csvCell).join(","));
-  return lines.join("\r\n") + "\r\n";
+  const rows = modelMatrixCells(model); // linked formula cells shared with the Excel push
+  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
-
 
 const bar = (used, budget, over) => {
   const pct = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0;

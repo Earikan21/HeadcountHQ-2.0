@@ -10,7 +10,6 @@ import { listRequests } from "../repos/requests.js";
 import { OPEN_STATUSES } from "../domain/requests.js";
 import { listEmployees } from "../repos/roster.js";
 import { getSettings } from "../repos/settings.js";
-import { getFinancials } from "../repos/planning.js";
 import { computeMetrics } from "../domain/metrics.js";
 import { buildHeadcountModel } from "../domain/model.js";
 import { listPlans, planHires } from "../repos/plans.js";
@@ -67,9 +66,8 @@ function buildOverview(ctx) {
   const settings = getSettings(ctx.db);
   const mult = Number(settings.loaded_cost_multiplier) || 1.2;
   const rollup = headcountRollup(ctx.db);
-  const fin = getFinancials(ctx.db);
   const now = new Date();
-  const metrics = computeMetrics({ employees, settings, rollup, financials: fin, now });
+  const metrics = computeMetrics({ employees, settings, rollup, now });
   const model = buildHeadcountModel({ employees, loadedMultiplier: mult, now });
   const nowYear = now.getFullYear();
   const mm = metrics.model || {};
@@ -78,7 +76,6 @@ function buildOverview(ctx) {
   const growth90 = recentSeatAdds(ctx.db, 90).total;
   const thisYear = (mm.costByYear || []).find((y) => y.year === nowYear);
   const avgLoadedMo = metrics.company.avgBase ? Math.round((metrics.company.avgBase * mult) / 12) : 0;
-  const runway = metrics.financials ? metrics.financials.runwayMonths : null;
 
   const kpis = [
     { label: "Headcount now", value: String(mm.headcountNow != null ? mm.headcountNow : metrics.company.headcount), sub: growth90 ? `+${growth90} last 90 days` : "" },
@@ -86,7 +83,6 @@ function buildOverview(ctx) {
     { label: `${nowYear} spend`, value: money(thisYear ? thisYear.totalLoaded : 0), sub: mm.yoyCostGrowthPct != null ? `${mm.yoyCostGrowthPct >= 0 ? "+" : ""}${mm.yoyCostGrowthPct}% YoY` : "" },
     { label: "Avg loaded / head", value: money(avgLoadedMo), sub: "per month" },
   ];
-  if (runway != null) kpis.push({ label: "Cash runway", value: runway + " mo", sub: "at current burn" });
   kpis.push({ label: "Net new (12 mo)", value: `${(mm.netNew12mo || 0) >= 0 ? "+" : ""}${mm.netNew12mo || 0}`, sub: "planned" });
 
   const deptBars = metrics.departments.slice(0, 6).map((d) => ({ name: d.department, pct: d.pctBaseCost, cost: d.totalLoaded }));
@@ -105,7 +101,6 @@ function buildOverview(ctx) {
   const topCost = metrics.departments.slice().sort((a, b) => b.pctBaseCost - a.pctBaseCost)[0];
   if (topCost && topCost.headcount) insights.push(`${topCost.department} is ${topCost.pctBaseCost}% of loaded cost — the biggest driver.`);
   if (mm.yoyCostGrowthPct != null) insights.push(`Fully-loaded run-rate is ${mm.yoyCostGrowthPct >= 0 ? "up" : "down"} ${Math.abs(mm.yoyCostGrowthPct)}% year over year.`);
-  if (runway != null) insights.push(`At current burn, runway is about ${runway} months.`);
   const rich = metrics.departments.filter((d) => d.headcount > 1).sort((a, b) => b.avgVsCompanyIndex - a.avgVsCompanyIndex)[0];
   if (rich && rich.avgVsCompanyIndex > 105) insights.push(`${rich.department} pays ${rich.avgVsCompanyIndex - 100}% above the company average salary.`);
   if ((mm.netNew12mo || 0) > 0) insights.push(`Plans add ${mm.netNew12mo} net new hires over the next 12 months.`);

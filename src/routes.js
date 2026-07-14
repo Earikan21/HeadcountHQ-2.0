@@ -14,6 +14,7 @@ import { registerRequestRoutes } from "./routes/requests.js";
 import { registerBudgetRoutes } from "./routes/budgets.js";
 import { registerPlanningRoutes } from "./routes/planning.js";
 import { registerAuditRoutes } from "./routes/audit.js";
+import { registerExcelRoutes } from "./routes/excel.js";
 import { registerOrgRoutes } from "./routes/org.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 
@@ -36,6 +37,7 @@ export function registerRoutes(router, deps = {}) {
   registerSeatRoutes(router);
   registerBudgetRoutes(router);
   registerAuditRoutes(router);
+  registerExcelRoutes(router);
   registerAssistantRoutes(router);
 
   // Hidden-by-default areas (internal tool). Re-enable with FEATURE_<AREA>=true.
