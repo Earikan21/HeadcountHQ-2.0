@@ -65,6 +65,9 @@ export function normalizeSettings(s = {}) {
     ai_provider: oneOf(s.ai_provider, ["anthropic", "openai"], "anthropic"),
     ai_full_read_enabled: bool(s.ai_full_read_enabled) ? 1 : 0,
     ai_assistant_enabled: bool(s.ai_assistant_enabled) ? 1 : 0,
+    // Workspace-wide department focus lens. '' = All. Free text (a department name);
+    // if it names a department that no longer exists, views fall back to All.
+    focus_department: typeof s.focus_department === "string" ? s.focus_department.trim() : "",
   };
 }
 

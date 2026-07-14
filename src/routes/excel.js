@@ -14,11 +14,19 @@ import { getSettings } from "../repos/settings.js";
 import { buildHeadcountModel, applyPlanOverrides } from "../domain/model.js";
 import { getPlan, planHires, planOverrides, planAssumptions } from "../repos/plans.js";
 import { modelValuesCsv } from "../domain/model_export.js";
+import { effectiveDeptName } from "../domain/focus.js";
 import { logAudit } from "../repos/audit.js";
 
+/** The address Excel/Power Query should fetch from. Prefer PUBLIC_URL (set it to the
+ *  server's real address on a host, e.g. https://headcounthq.onrender.com). If it's
+ *  unset we assume the common local case — server and Excel on the same machine — and
+ *  use localhost on the configured port, which actually resolves. */
+export function publicBase(config) {
+  return config.PUBLIC_URL || `http://localhost:${config.PORT}`;
+}
+
 function exportUrl(ctx, token) {
-  const base = ctx.config.PUBLIC_URL || "";
-  return `${base || "https://your-host"}/export/model.csv?token=${token}`;
+  return `${publicBase(ctx.config)}/export/model.csv?token=${token}`;
 }
 
 export function registerExcelRoutes(router) {
@@ -31,7 +39,8 @@ export function registerExcelRoutes(router) {
     const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
     const versionId = Number(ctx.query.get("version")) || null;
     const plan = versionId ? getPlan(ctx.db, versionId) : null;
-    const dept = ctx.query.get("dept") || null;
+    // Workspace focus lock (if set) overrides any ?dept= on the export URL.
+    const dept = effectiveDeptName(ctx, ctx.query.get("dept"));
     // A plan applies its overrides + scenario hires + assumptions; Actual is the roster.
     const all = applyPlanOverrides(listEmployees(ctx.db, {}), plan ? planOverrides(plan) : {});
     const employees = dept ? all.filter((e) => (e.department_name || "(none)") === dept) : all;
@@ -83,7 +92,7 @@ function statusPage(ctx, { row, justRotated = false }) {
     and hit Refresh whenever you want the latest. The tool stays the source of truth; any tab that links to the loaded
     table recalculates on refresh.</p></div>`;
 
-  const publicNote = ctx.config.PUBLIC_URL ? "" : html`<div class="flash warn">Tip: set <code>PUBLIC_URL</code> on the server so this shows your real address instead of a placeholder.</div>`;
+  const publicNote = ctx.config.PUBLIC_URL ? "" : html`<div class="flash warn">This link uses <code>http://localhost:${ctx.config.PORT}</code> — right if Excel runs on the same machine as the tool. If the tool is hosted (e.g. on Render), set <code>PUBLIC_URL</code> on the server to its real address so the link points there.</div>`;
 
   if (!row) {
     return renderPage(ctx, { title: "Excel live link", active: "excel", body: html`${head}${publicNote}
@@ -112,8 +121,8 @@ function statusPage(ctx, { row, justRotated = false }) {
       <h2>Set it up in Excel (once)</h2>
       <ol class="twofa-steps">
         <li>In Excel: <b>Data → Get Data → From Other Sources → From Web</b> (or <b>Data → From Web</b>).</li>
-        <li>Paste the URL above and choose <b>Anonymous</b> access when prompted. Click <b>Load</b> — your model lands in a table.</li>
-        <li>Link your other tabs to that table with normal formulas (SUMIFS, lookups, references).</li>
+        <li>Paste the URL above, choose <b>Anonymous</b> access when prompted, then click <b>Transform Data</b> to open the Power Query editor.</li>
+        <li>If the columns show as “Column1, Column2…”, click <b>Home → Use First Row as Headers</b> so they become Department, Name … and each month. Then <b>Close &amp; Load</b> — your model lands in a table.</li>
         <li>To update everything: <b>Data → Refresh All</b>. For hands-off updates, set <b>Query → Properties → Refresh every N minutes</b> or <b>Refresh on open</b>.</li>
       </ol>
       <p class="muted small">The table is values that refresh; your formulas linking to it recalc automatically on each refresh.</p>

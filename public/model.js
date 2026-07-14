@@ -332,4 +332,72 @@
     var xl = document.getElementById("excel-link-modal");
     if (xl) { xl.hidden = false; var f = xl.querySelector("input.mono"); if (f) f.select && f.select(); }
   }
+
+  // ---- AI hire chat (floating popup) -----------------------------------------
+  (function scnChat() {
+    var panel = document.getElementById("scn-chat");
+    if (!panel) return;
+    var version = panel.getAttribute("data-version");
+    var log = document.getElementById("scn-chat-log");
+    var form = document.getElementById("scn-chat-form");
+    var input = document.getElementById("scn-chat-input");
+    var csrfEl = document.getElementById("scn-chat-csrf");
+    var csrf = csrfEl ? csrfEl.value : "";
+    var messages = []; // running transcript for context
+    var busy = false;
+
+    Array.prototype.forEach.call(document.querySelectorAll("[data-open-chat]"), function (b) {
+      b.addEventListener("click", function () { panel.hidden = false; if (input) input.focus(); });
+    });
+    Array.prototype.forEach.call(panel.querySelectorAll("[data-close-chat]"), function (b) {
+      b.addEventListener("click", function () { panel.hidden = true; });
+    });
+
+    function add(role, text) {
+      var d = document.createElement("div");
+      d.className = "scn-msg " + role;
+      d.textContent = text;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+      return d;
+    }
+
+    function send() {
+      if (busy) return;
+      var text = (input.value || "").trim();
+      if (!text) return;
+      add("user", text);
+      messages.push({ role: "user", text: text });
+      input.value = "";
+      var pending = add("ai typing", "…");
+      busy = true;
+      var body = new URLSearchParams();
+      body.set("_csrf", csrf);
+      body.set("messages", JSON.stringify(messages));
+      fetch("/model/versions/" + version + "/ai.json", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: body.toString()
+      }).then(function (r) {
+        return r.json().catch(function () { return { ok: false, error: "Something went wrong." }; });
+      }).then(function (data) {
+        busy = false;
+        pending.className = "scn-msg ai";
+        if (!data.ok) { pending.textContent = data.error || "Sorry, that didn't work."; return; }
+        if (data.question) { pending.textContent = data.question; messages.push({ role: "assistant", text: data.question }); return; }
+        if (typeof data.added === "number") {
+          pending.textContent = data.summary || ("Added " + data.added + ".");
+          add("ai", "Refreshing the sheet…");
+          setTimeout(function () { window.location.reload(); }, 900);
+          return;
+        }
+        pending.textContent = "Done.";
+      }).catch(function () { busy = false; pending.className = "scn-msg ai"; pending.textContent = "Network error — try again."; });
+    }
+
+    form.addEventListener("submit", function (e) { e.preventDefault(); send(); });
+    if (input) input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+  })();
 })();

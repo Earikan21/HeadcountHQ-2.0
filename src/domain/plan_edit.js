@@ -44,10 +44,10 @@ export function parseCellEdit(body = {}) {
 
   if (field === "salary") {
     const trimmed = raw.trim();
-    if (trimmed === "") return { error: "Enter a salary (0 is allowed)." };
+    if (trimmed === "") return { error: "Enter a salary greater than 0." };
     const n = Number(trimmed);
     if (!Number.isFinite(n)) return { error: "Salary must be a number." };
-    if (n < 0) return { error: "Salary can't be negative." };
+    if (n <= 0) return { error: "Salary must be greater than 0." };
     if (n > MAX_SALARY) return { error: "That salary looks like a typo." };
     return { key, field, value: Math.round(n) };
   }
@@ -154,5 +154,5 @@ export function applyCellEdit({ edit, roster = [], hires = [], overrides = {} })
     overridden: Boolean(out[extId]),
     marks: { name: held("name"), start: held("start_date"), end: held("end_date"), salary: held("annual_salary") },
     value: echo,
-  };
+   };
 }

@@ -21,6 +21,7 @@ import { departmentPayStats } from "../domain/metrics.js";
 import { logAudit } from "../repos/audit.js";
 import { listPlans, getPlan, createPlan, duplicatePlan, renamePlan, planHires, setPlanHires, deletePlan, planAssumptions, setPlanAssumptions, planOverrides, setPlanOverrides, nextHireId } from "../repos/plans.js";
 import { parseCellEdit, applyCellEdit } from "../domain/plan_edit.js";
+import { effectiveDeptName, focusActive } from "../domain/focus.js";
 
 /** Money a department's headcount budget implies: current cost + midpoint of the
  *  expected cost of its still-unfilled budgeted positions. Idempotent. */
@@ -41,7 +42,8 @@ export function registerBudgetRoutes(router) {
     // Overrides are plan-local: `listEmployees` is never written to from here.
     const allEmployees = applyPlanOverrides(listEmployees(ctx.db, {}), overrides);
     const allDepartments = [...new Set(allEmployees.map((e) => e.department_name || "(none)"))].sort();
-    const dept = ctx.query.get("dept") || null;
+    // The workspace focus lock (if set) overrides any ?dept= selection.
+    const dept = effectiveDeptName(ctx, ctx.query.get("dept"));
     const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
     const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
     const assumptions = current ? planAssumptions(current) : {};
@@ -49,13 +51,14 @@ export function registerBudgetRoutes(router) {
     const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions });
     ctx.html(200, financialModelPage(ctx, model, {
       period: ctx.query.get("period"), plans, current, hires, dept, allDepartments, assumptions,
+      focusLocked: focusActive(ctx),
       canEdit: canSetBudgets(ctx.user),
       // The sheet is editable only inside a plan, and only for someone who may edit it.
       editable: Boolean(current) && canSetBudgets(ctx.user),
       // Excel live-link context: the export token + public base so a "Link to Excel"
       // popup can show the pull URL for this exact view (Actual or a specific plan).
       exportToken: canSetBudgets(ctx.user) ? (getExportToken(ctx.db)?.token || null) : null,
-      publicUrl: ctx.config.PUBLIC_URL || "",
+      publicUrl: ctx.config.PUBLIC_URL || `http://localhost:${ctx.config.PORT}`,
       aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
     }));
   };
@@ -76,7 +79,7 @@ export function registerBudgetRoutes(router) {
   const recompute = (ctx, plan, key) => {
     const overrides = planOverrides(plan);
     const hires = planHires(plan);
-    const dept = String(ctx.body.dept || "").trim() || null;
+    const dept = effectiveDeptName(ctx, ctx.body.dept);
     const period = ["month", "quarter", "year"].includes(String(ctx.body.period)) ? String(ctx.body.period) : "month";
 
     const all = applyPlanOverrides(listEmployees(ctx.db, {}), overrides);
@@ -196,17 +199,23 @@ export function registerBudgetRoutes(router) {
     const bSpec = sideOf(ctx.query.get("b") || (plans[0] ? String(plans[0].id) : "actual"));
 
     const win = alignedWindow([aSpec, bSpec], new Date());
-    const build = (spec) => ({
-      label: spec.label,
-      model: buildHeadcountModel({
-        employees: applyPlanOverrides(spec.employees, spec.overrides),
-        loadedMultiplier: mult, scenarioHires: spec.hires, assumptions: spec.assumptions,
-        start: win.start, months: win.months,
-      }),
-    });
+    // Compare has no per-view picker, so the only scope is the workspace focus lock.
+    const dept = effectiveDeptName(ctx, null);
+    const build = (spec) => {
+      const applied = applyPlanOverrides(spec.employees, spec.overrides);
+      const employees = dept ? applied.filter((e) => (e.department_name || "(none)") === dept) : applied;
+      const hires = dept ? spec.hires.filter((h) => h.department === dept) : spec.hires;
+      return {
+        label: spec.label,
+        model: buildHeadcountModel({
+          employees, loadedMultiplier: mult, scenarioHires: hires, assumptions: spec.assumptions,
+          start: win.start, months: win.months,
+        }),
+      };
+    };
 
     const diff = comparePlans(build(aSpec), build(bSpec));
-    ctx.html(200, comparePage(ctx, { diff, plans, a: aSpec.id, b: bSpec.id }));
+    ctx.html(200, comparePage(ctx, { diff, plans, a: aSpec.id, b: bSpec.id, focusLocked: focusActive(ctx), focusDept: dept }));
   });
 
   router.post("/model/versions/:id/delete", (ctx) => {
@@ -221,22 +230,28 @@ export function registerBudgetRoutes(router) {
     const plan = getPlan(ctx.db, Number(ctx.params.id));
     if (!plan) return ctx.redirect("/model");
     const b = ctx.body;
-    if (String(b.scn_department || "").trim() && Number(b.scn_salary) > 0) {
-      const hires = planHires(plan);
-      // One record per person, each individually nameable and editable on the sheet.
-      const count = Math.max(1, Math.min(200, Number(b.scn_count) || 1));
-      const role = String(b.scn_role || "Hire").trim() || "Hire";
-      for (let i = 0; i < count; i++) {
-        hires.push({
-          id: nextHireId(hires), department: String(b.scn_department).trim(), role,
-          name: count > 1 ? `${role} ${i + 1}` : role,
-          start_month: /^\d{4}-\d{2}$/.test(String(b.scn_start || "")) ? b.scn_start : null,
-          end_month: /^\d{4}-\d{2}$/.test(String(b.scn_end || "")) ? b.scn_end : null,
-          annual_salary: Number(b.scn_salary) || 0,
-        });
-      }
-      setPlanHires(ctx.db, plan.id, hires);
+    // Explicit validation so a bad entry is rejected with a reason, not silently dropped.
+    const salary = Number(b.scn_salary);
+    if (!String(b.scn_department || "").trim()) {
+      return ctx.redirect(`/model?version=${plan.id}&msg=Pick+a+department+for+the+new+headcount`);
     }
+    if (!Number.isFinite(salary) || salary <= 0) {
+      return ctx.redirect(`/model?version=${plan.id}&msg=Salary+must+be+greater+than+0`);
+    }
+    const hires = planHires(plan);
+    // One record per person, each individually nameable and editable on the sheet.
+    const count = Math.max(1, Math.min(200, Number(b.scn_count) || 1));
+    const role = String(b.scn_role || "Hire").trim() || "Hire";
+    for (let i = 0; i < count; i++) {
+      hires.push({
+        id: nextHireId(hires), department: String(b.scn_department).trim(), role,
+        name: count > 1 ? `${role} ${i + 1}` : role,
+        start_month: /^\d{4}-\d{2}$/.test(String(b.scn_start || "")) ? b.scn_start : null,
+        end_month: /^\d{4}-\d{2}$/.test(String(b.scn_end || "")) ? b.scn_end : null,
+        annual_salary: Math.round(salary),
+      });
+    }
+    setPlanHires(ctx.db, plan.id, hires);
     ctx.redirect(`/model?version=${plan.id}`);
   });
 
@@ -391,63 +406,88 @@ export function registerBudgetRoutes(router) {
     ctx.redirect(`/model?version=${plan.id}${dept ? "&dept=" + encodeURIComponent(dept) : ""}`);
   });
 
-  // Add planned hires to a version from a plain-English description (AI).
+  // Turn a plain-English description (or a chat transcript) into hires. Returns a
+  // result the caller renders: a clarifying `question`, the number `added`, or an
+  // `error`. Shared by the form endpoint and the chat (JSON) endpoint.
+  const planHiresFromDescription = async (ctx, plan, description) => {
+    const desc = String(description || "").trim();
+    if (!desc) return { question: "Tell me who to add — a department, how many, a start month, and a salary." };
+    if (!ctx.config.aiImportConfigured) return { error: "The AI isn't configured on the server." };
+    const client = clientFromConfig(ctx.config);
+    const payStats = departmentPayStats(listEmployees(ctx.db, {}));
+    const now = new Date();
+    const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const parsed = await parseScenarioHires({ description: desc, departments: listDepartments(ctx.db).map((d) => d.name), payStats, now, client });
+    if (parsed.question) return { question: parsed.question };
+    if (!parsed.length) return { question: 'I need a little more: which department, how many, a start month, and a salary (a number, or say "the department average").' };
+    const problems = [];
+    for (const h of parsed) {
+      if (!h.department || h.department === "(scenario)") problems.push("which department the " + (h.role || "hire") + " is in");
+      if (!(Number(h.annual_salary) > 0)) problems.push("a salary for the " + (h.role || "hire"));
+      if (Number(h.annual_salary) > 50_000_000) problems.push("a realistic salary for the " + (h.role || "hire") + " (that one looks like a typo)");
+      if (h.start_month && !/^\d{4}-\d{2}$/.test(String(h.start_month))) problems.push("a valid start month (YYYY-MM) for the " + (h.role || "hire"));
+    }
+    if (problems.length) return { question: "Before I add that, I need " + [...new Set(problems)].join(", and ") + "." };
+    const hires = planHires(plan);
+    const added = [];
+    for (const h of parsed) {
+      const count = Math.max(1, Math.min(200, Number(h.count) || 1));
+      const role = String(h.role || "Hire").trim() || "Hire";
+      for (let i = 0; i < count; i++) {
+        const rec = {
+          id: nextHireId(hires), department: h.department || "(scenario)", role,
+          name: count > 1 ? `${role} ${i + 1}` : role,
+          start_month: h.start_month || nowMonth, end_month: h.end_month || null,
+          annual_salary: Number(h.annual_salary) || 0,
+        };
+        hires.push(rec); added.push(rec);
+      }
+    }
+    setPlanHires(ctx.db, plan.id, hires);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "plan.ai_hires", entity: "plan_version", entityId: plan.id, detail: { added: added.length } });
+    return { added: added.length, names: added.map((h) => h.name) };
+  };
+
+  // Add planned hires from a description (form; full-page — no-JS fallback).
   router.post("/model/versions/:id/ai", async (ctx) => {
     if (!requirePermission(ctx, canSetBudgets)) return;
     const plan = getPlan(ctx.db, Number(ctx.params.id));
     if (!plan) return ctx.redirect("/model");
     const description = String(ctx.body.description || "").trim();
-    if (!description || !ctx.config.aiImportConfigured) {
-      return renderModel(ctx, plan.id, { aiError: description ? "Configure a provider key to use AI." : null });
-    }
+    if (!description) return renderModel(ctx, plan.id, {});
     try {
-      const client = clientFromConfig(ctx.config);
-      // Real per-department pay, so "pay them the department average" resolves to an
-      // actual figure rather than a number the model invents.
-      const payStats = departmentPayStats(listEmployees(ctx.db, {}));
-      const now = new Date();
-      const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const parsed = await parseScenarioHires({ description, departments: listDepartments(ctx.db).map((d) => d.name), payStats, now, client });
-      // If the assistant needs clarification, surface its question and add nothing.
-      if (parsed.question) {
-        return renderModel(ctx, plan.id, { aiAsk: parsed.question });
-      }
-      // Data validation before instating: if the AI couldn't pin down the essentials,
-      // ask for them rather than inventing a hire.
-      if (!parsed.length) {
-        return renderModel(ctx, plan.id, { aiAsk: `I need a little more before I can add that: which department, how many, a start month, and a salary (a number, or say "the department average"). You wrote: “${description.slice(0, 140)}”. Can you fill in what's missing?` });
-      }
-      const problems = [];
-      for (const h of parsed) {
-        if (!h.department || h.department === "(scenario)") problems.push("which department the " + (h.role || "hire") + " is in");
-        if (!(Number(h.annual_salary) > 0)) problems.push("a salary for the " + (h.role || "hire"));
-        if (Number(h.annual_salary) > 50_000_000) problems.push("a realistic salary for the " + (h.role || "hire") + " (that one looks like a typo)");
-        if (h.start_month && !/^\d{4}-\d{2}$/.test(String(h.start_month))) problems.push("a valid start month (YYYY-MM) for the " + (h.role || "hire"));
-      }
-      if (problems.length) {
-        return renderModel(ctx, plan.id, { aiAsk: "Before I add that, I need " + [...new Set(problems)].join(", and ") + ". Add those details and try again." });
-      }
-      // The model returns {department, role, count, ...}; explode into individually
-      // editable records so AI-added hires behave exactly like hand-added ones.
-      const hires = planHires(plan);
-      for (const h of parsed) {
-        const count = Math.max(1, Math.min(200, Number(h.count) || 1));
-        const role = String(h.role || "Hire").trim() || "Hire";
-        for (let i = 0; i < count; i++) {
-          hires.push({
-            id: nextHireId(hires), department: h.department || "(scenario)", role,
-            name: count > 1 ? `${role} ${i + 1}` : role,
-            start_month: h.start_month || nowMonth, end_month: h.end_month || null,
-            annual_salary: Number(h.annual_salary) || 0,
-          });
-        }
-      }
-      setPlanHires(ctx.db, plan.id, hires);
+      const r = await planHiresFromDescription(ctx, plan, description);
+      if (r.error) return renderModel(ctx, plan.id, { aiError: r.error });
+      if (r.question) return renderModel(ctx, plan.id, { aiAsk: r.question });
       ctx.redirect(`/model?version=${plan.id}`);
     } catch (e) {
       const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
       console.error(`[model] ai plan failed: ${reason}`);
       renderModel(ctx, plan.id, { aiError: "The AI couldn't model that — " + reason + " (check the provider key/model on the server)." });
+    }
+  });
+
+  // Conversational hire planner (chat popup). Returns JSON; carries the transcript so
+  // the AI can use earlier turns, and asks clarifying questions before committing.
+  router.post("/model/versions/:id/ai.json", async (ctx) => {
+    if (!canSetBudgets(ctx.user)) return ctx.json(403, { ok: false, error: "You don't have access to that." });
+    const plan = getPlan(ctx.db, Number(ctx.params.id));
+    if (!plan) return ctx.json(404, { ok: false, error: "That plan no longer exists — reload." });
+    let messages = [];
+    try { messages = JSON.parse(ctx.body.messages || "[]"); } catch { messages = []; }
+    const transcript = Array.isArray(messages)
+      ? messages.map((m) => (m && m.role === "assistant" ? "Assistant asked: " : "User: ") + String((m && m.text) || "").slice(0, 500)).join("\n").slice(0, 4000)
+      : "";
+    const description = transcript || String(ctx.body.text || "").trim();
+    try {
+      const r = await planHiresFromDescription(ctx, plan, description);
+      if (r.error) return ctx.json(200, { ok: false, error: r.error });
+      if (r.question) return ctx.json(200, { ok: true, question: r.question });
+      const names = r.names.slice(0, 6).join(", ") + (r.names.length > 6 ? "…" : "");
+      return ctx.json(200, { ok: true, added: r.added, summary: `Added ${r.added} hire${r.added === 1 ? "" : "s"} to this plan: ${names}.` });
+    } catch (e) {
+      const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
+      return ctx.json(200, { ok: false, error: "The AI couldn't model that — " + reason });
     }
   });
 
@@ -490,7 +530,7 @@ export function registerBudgetRoutes(router) {
     const current = versionId ? getPlan(ctx.db, versionId) : null;
     const hires = planHires(current);
     const allEmployees = applyPlanOverrides(listEmployees(ctx.db, {}), current ? planOverrides(current) : {});
-    const dept = ctx.query.get("dept") || null;
+    const dept = effectiveDeptName(ctx, ctx.query.get("dept"));
     const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
     const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
     const assumptions = current ? planAssumptions(current) : {};

@@ -1,6 +1,7 @@
 import { html, raw } from "../html.js";
 import { renderPage, money } from "../views/ui.js";
 import { canViewCompTotals, departmentScope, canSeeAllDepartments, canManageSettings, displayRole, canImportRoster } from "../authz.js";
+import { focusScope, focusDeptId } from "../domain/focus.js";
 import { countUsers } from "../repos/users.js";
 import { listDepartments } from "../repos/departments.js";
 import { headcountRollup, recentSeatAdds } from "../repos/seats.js";
@@ -32,7 +33,7 @@ export function registerHomeRoutes(router) {
     if (canSeeAllDepartments(ctx.user)) {
       return ctx.html(200, renderPage(ctx, { title: "Overview", body: buildOverview(ctx), active: "dashboard" }));
     }
-    const scope = departmentScope(ctx.user);
+    const scope = focusScope(ctx, departmentScope(ctx.user));
     const roll = headcountRollup(ctx.db, { departmentId: scope });
     const t = roll.totals;
     const showCost = canViewCompTotals(ctx.user);
@@ -62,10 +63,13 @@ export function registerHomeRoutes(router) {
 }
 
 function buildOverview(ctx) {
-  const employees = listEmployees(ctx.db, {});
+  // Honor the workspace focus lock: an admin/client overview scoped to one department.
+  const fid = focusDeptId(ctx);
+  const idScope = fid != null ? { departmentId: [fid] } : {};
+  const employees = listEmployees(ctx.db, idScope);
   const settings = getSettings(ctx.db);
   const mult = Number(settings.loaded_cost_multiplier) || 1.2;
-  const rollup = headcountRollup(ctx.db);
+  const rollup = headcountRollup(ctx.db, idScope);
   const now = new Date();
   const metrics = computeMetrics({ employees, settings, rollup, now });
   const model = buildHeadcountModel({ employees, loadedMultiplier: mult, now });

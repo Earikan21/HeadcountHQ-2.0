@@ -73,6 +73,21 @@ function planBar(ctx, extra) {
   </div>`;
 }
 
+/** Floating chat window for planning hires with AI (posts to /ai.json). */
+function aiChatWidget(ctx, cur) {
+  return html`<div id="scn-chat" class="scn-chat" hidden data-version="${cur.id}" aria-label="Plan hires with AI">
+    <header class="scn-chat-head"><b>Plan hires with AI</b><button type="button" class="scn-chat-x" data-close-chat aria-label="Close">&times;</button></header>
+    <div class="scn-chat-log" id="scn-chat-log">
+      <div class="scn-msg ai">Tell me who to add — e.g. “2 AEs in Sales starting Jun 2027 at the department average”. I'll ask if anything's unclear, then add them to <b>${cur.name}</b>.</div>
+    </div>
+    <form class="scn-chat-form" id="scn-chat-form">
+      <input type="hidden" id="scn-chat-csrf" value="${ctx.csrf}">
+      <textarea id="scn-chat-input" rows="2" placeholder="Describe the hires…" aria-label="Message"></textarea>
+      <button class="btn sm" type="submit">Send</button>
+    </form>
+  </div>`;
+}
+
 /** The plan editor: a prominent "add headcount" button and a compact, open-by-default
  *  assumptions strip with an inline department selector. */
 function planEditor(ctx, extra) {
@@ -97,7 +112,10 @@ function planEditor(ctx, extra) {
   const addSection = html`<details class="add-scn">
     <summary class="add-scn-btn"><span class="plus" aria-hidden="true">+</span> Add scenario headcount</summary>
     <div class="add-scn-body">
-      ${extra.aiReady ? html`<form method="post" action="/model/versions/${cur.id}/ai" class="scn-ai" data-validate>${csrfField(ctx)}<input name="description" placeholder="Describe it in plain English — e.g. 2 AEs in Sales starting Jun 2027 at $120k" aria-label="Describe hires"><button class="btn sm" type="submit">Add with AI</button></form>
+      ${extra.aiReady ? html`<div class="scn-ai-row">
+        <button type="button" class="btn sm" data-open-chat>&#10024; Plan hires with AI</button>
+        <span class="muted small">Chat it in plain English — I'll ask if I need more, then add them.</span>
+      </div>
       <div class="scn-or"><span>or add one manually</span></div>` : ""}
       <form method="post" action="/model/versions/${cur.id}/hire" class="scn-manual" data-validate>
         ${csrfField(ctx)}
@@ -114,7 +132,7 @@ function planEditor(ctx, extra) {
     </div>
   </details>`;
 
-  const deptSelect = html`<select id="asm-dept" data-version="${cur.id}" aria-label="Department these assumptions apply to">
+  const deptSelect = html`<select id="asm-dept" data-version="${cur.id}" aria-label="Department these assumptions apply to" ${extra.focusLocked ? raw("disabled title=\"Locked by the workspace department focus (Settings)\"") : ""}>
     <option value="">Company-wide default</option>
     ${allDepts.map((d) => html`<option value="${d}" ${scope === d ? raw("selected") : ""}>${d}</option>`)}
   </select>`;
@@ -140,6 +158,7 @@ function planEditor(ctx, extra) {
     ${extra.aiAsk ? html`<div class="flash">${extra.aiAsk}</div>` : ""}
     ${addSection}
     ${asmSection}
+    ${extra.aiReady ? aiChatWidget(ctx, cur) : ""}
   </section>`;
 }
 
@@ -181,7 +200,7 @@ function rowActions(ctx, r, extra, { isAdmin, editable, key }) {
 /** "Link to Excel" popup — the Power Query URL for THIS view (Actual or one plan). */
 function excelLinkModal(ctx, extra) {
   if (!extra.canEdit) return "";
-  const base = extra.publicUrl || "https://your-host";
+  const base = extra.publicUrl || "http://localhost:3000";
   const token = extra.exportToken;
   const scope = extra.current ? `the plan “${extra.current.name}”` : "your live model (Actual)";
   const url = token ? `${base}/export/model.csv?token=${token}${extra.current ? "&version=" + extra.current.id : ""}` : "";
@@ -199,7 +218,8 @@ function excelLinkModal(ctx, extra) {
       ${setup}
       <ol class="twofa-steps" style="margin:12px 0 0">
         <li>In Excel: <b>Data → Get Data → From Other Sources → From Web</b> (or <b>Data → From Web</b>).</li>
-        <li>Paste the URL, choose <b>Anonymous</b> if asked, then <b>Load</b>.</li>
+        <li>Paste the URL, choose <b>Anonymous</b> if asked, then click <b>Transform Data</b> (not Load) to open the editor.</li>
+        <li>If the columns read “Column1, Column2…”, click <b>Home → Use First Row as Headers</b>. Now they read Department, Name … and each month. Then <b>Close &amp; Load</b>.</li>
         <li>Link your other tabs to that table with formulas (SUMIFS, XLOOKUP) or a PivotTable.</li>
         <li>Update anytime: <b>Data → Refresh All</b>, or set auto-refresh in Query → Properties.</li>
       </ol>
@@ -245,7 +265,7 @@ export function financialModelPage(ctx, model, extra = {}) {
   const controls = html`<div class="model-controls">
     <div class="ptabs">${periodTab("month", "Monthly")}${periodTab("quarter", "Quarterly")}${periodTab("year", "Yearly")}</div>
     <input id="f-search" type="search" placeholder="Search name / role" aria-label="Search">
-    <select id="f-dept" aria-label="Scope to department"><option value="">All departments</option>${allDepts.map((d) => html`<option value="${d}" ${extra.dept === d ? raw("selected") : ""}>${d}</option>`)}</select>
+    <select id="f-dept" aria-label="Scope to department" ${extra.focusLocked ? raw("disabled title=\"Locked by the workspace department focus (Settings)\"") : ""}><option value="">All departments</option>${allDepts.map((d) => html`<option value="${d}" ${extra.dept === d ? raw("selected") : ""}>${d}</option>`)}</select>
     <span class="zoomctl"><button id="zoom-out" type="button" aria-label="Zoom out">&minus;</button><span id="zoom-lvl">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button></span>
     <span class="spacer"></span>
     ${editable ? raw('<span id="save-pill" class="save-pill" role="status" aria-live="polite" hidden></span>') : ""}

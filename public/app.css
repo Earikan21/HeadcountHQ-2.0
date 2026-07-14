@@ -663,3 +663,34 @@ details.asm-sect:not([open]) > summary::before { content: "▸"; }
 /* Wider modal for the Excel-link popup (holds a full URL). */
 .modal.wide { max-width: 560px; }
 .modal.wide .mono { font-size: 12px; }
+
+/* ---- AI hire chat (floating popup on the plan editor) ---- */
+.scn-ai-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.scn-chat { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: 380px; max-width: calc(100vw - 32px);
+  height: 460px; max-height: calc(100vh - 120px); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-md); }
+.scn-chat[hidden] { display: none; }
+.scn-chat-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px;
+  border-bottom: 1px solid var(--line); font-size: 14px; }
+.scn-chat-x { border: none; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--muted); }
+.scn-chat-x:hover { color: var(--ink); }
+.scn-chat-log { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.scn-msg { padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.45; max-width: 90%; white-space: pre-wrap; }
+.scn-msg.ai { background: var(--surface-2); color: var(--ink); align-self: flex-start; border-bottom-left-radius: 3px; }
+.scn-msg.user { background: var(--brand); color: #fff; align-self: flex-end; border-bottom-right-radius: 3px; }
+.scn-msg.typing { color: var(--muted); font-style: italic; }
+.scn-chat-form { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); align-items: flex-end; }
+.scn-chat-form textarea { flex: 1; resize: none; margin: 0; font-size: 13px; }
+
+/* ---- Department focus lens ---- */
+.focus-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 14px; padding: 9px 14px; border-radius: 10px;
+  background: var(--brand-050, #eef4ff); border: 1px solid var(--brand-200, #b9d0ff); color: var(--ink); font-size: 13px; }
+.focus-banner .fb-text b { font-weight: 700; }
+.focus-banner form { margin: 0; }
+.focus-banner .linklike { color: var(--brand); font-weight: 600; }
+.focus-form { margin-bottom: 18px; }
+.card.focus-on { border-color: var(--brand-200, #b9d0ff); box-shadow: 0 0 0 1px var(--brand-200, #b9d0ff) inset; }
+.focus-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.focus-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.focus-note { color: var(--muted); font-size: 13px; }

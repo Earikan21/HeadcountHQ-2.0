@@ -667,4 +667,14 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    name: "2026_07_14_030_focus_department",
+    up(db) {
+      // A workspace-wide "focus" lens: when set to a department name, the whole tool
+      // shows only that department (dashboard, roster, every model/plan, compare,
+      // budgets, and the Excel export). Empty string = All departments (default).
+      // This is a presentation filter, not a security boundary.
+      db.exec(`ALTER TABLE workspace_settings ADD COLUMN focus_department TEXT NOT NULL DEFAULT '';`);
+    },
+  },
 ];

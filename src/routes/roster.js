@@ -3,6 +3,7 @@ import { renderPage, csrfField, errorList, money } from "../views/ui.js";
 import { peoplePage } from "../views/people.js";
 import { requireAuth, requirePermission } from "../middleware.js";
 import { canImportRoster, compVisibility, canViewCompTotals, departmentScope } from "../authz.js";
+import { focusScope } from "../domain/focus.js";
 import { detectHeaderRow, matrixToRows, toCsv } from "../domain/csv.js";
 import { parseUpload } from "../domain/adapters.js";
 import * as R from "../domain/roster.js";
@@ -69,7 +70,8 @@ export function registerRosterRoutes(router) {
   // ---- Roster view (all signed-in users; scoped + comp-limited by role) ----
   router.get("/roster", (ctx) => {
     if (!requireAuth(ctx)) return;
-    const scope = departmentScope(ctx.user);
+    // The workspace focus lock narrows the user's own scope further (never widens it).
+    const scope = focusScope(ctx, departmentScope(ctx.user));
     const employees = listEmployees(ctx.db, { departmentId: scope });
     const roll = headcountRollup(ctx.db, { departmentId: scope });
     const seats = listSeats(ctx.db, { departmentId: scope });

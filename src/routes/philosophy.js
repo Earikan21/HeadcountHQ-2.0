@@ -1,9 +1,9 @@
-import { html, raw } from "../html.js";
+import { html, raw, esc } from "../html.js";
 import { renderPage, csrfField, money } from "../views/ui.js";
 import { requirePermission, requireFeature } from "../middleware.js";
 import { featureEnabled } from "../features.js";
 import { canManageSettings } from "../authz.js";
-import { getSettings, updateSettings } from "../repos/settings.js";
+import { getSettings, updateSettings, setFocusDepartment } from "../repos/settings.js";
 import { getDepartmentTargets, saveDepartmentTargets } from "../repos/targets.js";
 import { listDepartments } from "../repos/departments.js";
 import { headcountRollup } from "../repos/seats.js";
@@ -38,6 +38,19 @@ export function registerPhilosophyRoutes(router) {
     updateSettings(ctx.db, { ...preserved, ...ctx.body }, ctx.user.id);
     logAudit(ctx.db, { userId: ctx.user.id, action: "philosophy.updated", entity: "workspace_settings", entityId: 1 });
     ctx.redirect("/philosophy?msg=Philosophy+saved");
+  });
+
+  // Workspace-wide department focus lens. Set it to one department to make the whole
+  // tool show only that department (e.g. on a client call with a department head), or
+  // clear it back to All. Saved on its own so it never collides with the main form.
+  router.post("/philosophy/focus", (ctx) => {
+    if (!requirePermission(ctx, canManageSettings)) return;
+    const name = String(ctx.body.focus_department || "").trim();
+    // Only accept a real department name (or "" for All); ignore anything else.
+    const valid = name === "" || listDepartments(ctx.db).some((d) => d.name === name);
+    setFocusDepartment(ctx.db, valid ? name : "", ctx.user.id);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "philosophy.focus_set", entity: "workspace_settings", entityId: 1, detail: { focus: valid ? name : "" } });
+    ctx.redirect(`/philosophy?msg=${name ? "Focused+on+" + encodeURIComponent(name) : "Showing+all+departments"}`);
   });
 
   // Apply phase suggestions to the scalar params (benchmark-derived — flagged)
@@ -119,6 +132,24 @@ function page(ctx) {
       (seats, requests, dashboards) read from here. Phase &amp; industry only suggest
       starting points; you have direct control over every value.</p>
     </div>
+
+    <form method="post" action="/philosophy/focus" class="focus-form">
+      ${csrfField(ctx)}
+      <section class="card ${s.focus_department ? "focus-on" : ""}">
+        <h2>Department focus <span class="hint">show one department across the whole tool</span></h2>
+        <p class="muted small">Lock the entire tool — dashboard, roster, every model and plan, compare, and the Excel export — to a single department. Handy on a call with one department's head. It's a display filter for everyone, not a security setting; switch back to <b>All departments</b> anytime.</p>
+        <div class="focus-row">
+          <label>Focus on
+            <select name="focus_department" aria-label="Department focus">
+              ${raw(`<option value="" ${s.focus_department ? "" : "selected"}>All departments</option>`)}
+              ${depts.map((d) => raw(`<option value="${esc(d.name)}" ${s.focus_department === d.name ? "selected" : ""}>${esc(d.name)}</option>`))}
+            </select>
+          </label>
+          <button class="btn" type="submit">Apply focus</button>
+          ${s.focus_department ? html`<span class="focus-note">Currently showing <b>${s.focus_department}</b> only.</span>` : ""}
+        </div>
+      </section>
+    </form>
 
     <form method="post" action="/philosophy">
       ${csrfField(ctx)}

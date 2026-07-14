@@ -26,3 +26,13 @@ export function updateSettings(db, fields, userId) {
   );
   return getSettings(db);
 }
+
+/** Set the workspace-wide department focus lens on its own, so saving the main
+ *  settings form never clobbers it (and vice-versa). '' clears it (All departments). */
+export function setFocusDepartment(db, name, userId) {
+  const value = typeof name === "string" ? name.trim() : "";
+  db.prepare(
+    `UPDATE workspace_settings SET focus_department=?, updated_at=datetime('now'), updated_by=? WHERE workspace_id = 1`
+  ).run(value, userId);
+  return getSettings(db);
+}

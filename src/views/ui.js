@@ -4,8 +4,9 @@
  * goes through the auto-escaping `html` tag from ../html.js.
  */
 import { html, raw, esc } from "../html.js";
-import { canViewCompTotals, canUseAssistant, displayRole, canViewBudgets, canSetBudgets } from "../authz.js";
+import { canViewCompTotals, canUseAssistant, displayRole, canViewBudgets, canSetBudgets, canManageSettings } from "../authz.js";
 import { listPlans } from "../repos/plans.js";
+import { focusDeptName } from "../domain/focus.js";
 
 /** A hidden CSRF input bound to the request's double-submit token. */
 export function csrfField(ctx) {
@@ -126,6 +127,7 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
     </aside>
     <main class="content">
       <div class="wrap">
+        ${focusBanner(ctx)}
         ${flashMsg ? html`<div class="flash">${flashMsg}</div>` : ""}
         ${subtabs}
         ${raw(body)}
@@ -135,6 +137,19 @@ export function renderPage(ctx, { title, body, active = "", flash = "" }) {
   ${showAssistant ? assistantWidget(ctx) : ""}
 </body>
 </html>`;
+}
+
+/** Tool-wide banner shown on every page while a department focus lock is active, so
+ *  it's obvious (e.g. during a screen-share) that figures are scoped. Admins get a
+ *  one-click "Show all departments" to lift it. */
+function focusBanner(ctx) {
+  const dept = focusDeptName(ctx);
+  if (!dept) return "";
+  const canClear = ctx.user && canManageSettings(ctx.user);
+  return html`<div class="focus-banner" role="status">
+    <span class="fb-text">Showing <b>${dept}</b> only — every model and page is scoped to this department.</span>
+    ${canClear ? html`<form method="post" action="/philosophy/focus" class="inline">${csrfField(ctx)}<input type="hidden" name="focus_department" value=""><button class="linklike" type="submit">Show all departments</button></form>` : ""}
+  </div>`;
 }
 
 /** Floating "Ask AI" assistant widget (Directive 4.0) — shown on every page for
