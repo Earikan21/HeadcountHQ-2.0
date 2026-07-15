@@ -200,27 +200,55 @@ function rowActions(ctx, r, extra, { isAdmin, editable, key }) {
 /** "Link to Excel" popup — the Power Query URL for THIS view (Actual or one plan). */
 function excelLinkModal(ctx, extra) {
   if (!extra.canEdit) return "";
-  const base = extra.publicUrl || "http://localhost:3000";
+  const base = extra.publicUrl || "https://headcounthq.onrender.com";
   const token = extra.exportToken;
   const scope = extra.current ? `the plan “${extra.current.name}”` : "your live model (Actual)";
-  const url = token ? `${base}/export/model.csv?token=${token}${extra.current ? "&version=" + extra.current.id : ""}` : "";
+  // Build a pull URL for a given feed, optionally scoped to a single department.
+  const urlFor = (path, withDept) => `${base}${path}?token=${token}`
+    + (extra.current ? "&version=" + extra.current.id : "")
+    + (withDept && extra.dept ? "&dept=" + encodeURIComponent(extra.dept) : "");
+  const urlField = (label, value) => html`<label>${label}
+    <input type="text" class="mono" value="${value}" readonly onclick="this.select()" aria-label="${label}" style="width:100%">
+  </label>`;
+
+  const DETAIL = "/export/model.csv", SUMMARY = "/export/summary.csv";
+  let links;
+  if (!token) {
+    links = "";
+  } else if (extra.dept && extra.focusLocked) {
+    // A workspace focus is on: every export is scoped to it, no choice to make.
+    links = html`${urlField(`Detail — ${extra.dept} only (workspace focus)`, urlFor(DETAIL, true))}`;
+  } else if (extra.dept) {
+    // A department is selected in the view: offer either scope.
+    links = html`${urlField(`Detail — just this department (${extra.dept})`, urlFor(DETAIL, true))}
+      ${urlField("Detail — all departments", urlFor(DETAIL, false))}`;
+  } else {
+    links = html`${urlField(`Detail — one row per person (${scope})`, urlFor(DETAIL, false))}`;
+  }
+
+  // The summary is a separate, small table: headcount and cost per department + a TOTAL
+  // row. Because its rows track departments (not people), links to it stay put when you
+  // add headcount — so it's the one to reference from other tabs.
+  const summaryField = token
+    ? html`${urlField("Monthly summary — headcount & cost per department, every month + TOTAL (stable to link to)", urlFor(SUMMARY, Boolean(extra.dept)))}`
+    : "";
+
   const setup = token
-    ? html`<label>Power Query URL for ${scope}
-        <input type="text" class="mono" value="${url}" readonly onclick="this.select()" aria-label="Power Query URL" style="width:100%">
-      </label>
-      <p class="muted small">Rotate or disable this link under <a href="/integrations/excel">Admin → Link to Excel</a>.</p>`
+    ? html`${links}
+      ${summaryField}
+      <p class="muted small">${extra.dept && !extra.focusLocked ? "Pick the detail scope you want. " : ""}Link your formulas to the <b>summary</b> table — its cells don't move when you add headcount. Rotate or disable these links under <a href="/integrations/excel">Admin → Link to Excel</a>.</p>`
     : html`<p class="muted small">First, create a private link (a token). You do this once — then Actual and every plan each have their own URL.</p>
       <form method="post" action="/integrations/excel/token/ensure" class="inline">${csrfField(ctx)}<input type="hidden" name="return" value="${extra.current ? "/model?version=" + extra.current.id : "/model"}"><button class="btn" type="submit">Create link</button></form>`;
   return html`<div id="excel-link-modal" class="modal-scrim" hidden>
     <section class="modal wide" role="dialog" aria-modal="true" aria-labelledby="xl-h">
       <h2 id="xl-h">Link to Excel</h2>
-      <p class="muted small">Pull ${scope} into Excel with Power Query. It refreshes on demand, and any tab that links to the loaded table recalculates. One-way — the tool stays the source of truth.</p>
+      <p class="muted small">Pull ${scope} into Excel with Power Query. Two feeds: the <b>detail</b> (one row per person) and a <b>monthly summary</b> (headcount &amp; cost per department for every month, plus TOTAL rows). Both refresh on demand; one-way — the tool stays the source of truth.</p>
       ${setup}
       <ol class="twofa-steps" style="margin:12px 0 0">
-        <li>In Excel: <b>Data → Get Data → From Other Sources → From Web</b> (or <b>Data → From Web</b>).</li>
-        <li>Paste the URL, choose <b>Anonymous</b> if asked, then click <b>Transform Data</b> (not Load) to open the editor.</li>
-        <li>If the columns read “Column1, Column2…”, click <b>Home → Use First Row as Headers</b>. Now they read Department, Name … and each month. Then <b>Close &amp; Load</b>.</li>
-        <li>Link your other tabs to that table with formulas (SUMIFS, XLOOKUP) or a PivotTable.</li>
+        <li>In Excel: <b>Data → Get Data → From Other Sources → From Web</b> (or <b>Data → From Web</b>). Do this once per URL you want.</li>
+        <li>Paste a URL, choose <b>Anonymous</b> if asked, then click <b>Transform Data</b> (not Load) to open the editor.</li>
+        <li>If the columns read “Column1, Column2…”, click <b>Home → Use First Row as Headers</b>, then <b>Close &amp; Load</b>.</li>
+        <li>Reference the <b>summary</b> table from your other tabs (its rows are per department, so cells stay put as you add headcount). The detail table is there for a full PivotTable or SUMIFS.</li>
         <li>Update anytime: <b>Data → Refresh All</b>, or set auto-refresh in Query → Properties.</li>
       </ol>
       <div class="modal-actions"><button class="btn ghost" type="button" data-close-modal>Done</button></div>

@@ -43,7 +43,8 @@ export function registerAssistantRoutes(router) {
     } catch (e) {
       const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
       console.error(`[assistant] ask failed: ${reason}`);
-      return ctx.json(200, { error: "The assistant hit an error — " + reason });
+      // Keep upstream provider/endpoint detail server-side; the client gets a generic message.
+      return ctx.json(200, { error: "The assistant hit an error. Please try again." });
     }
   });
 
@@ -61,7 +62,8 @@ export function registerAssistantRoutes(router) {
     } catch (e) {
       const reason = (e && e.message ? e.message : String(e)).replace(/\s+/g, " ").trim().slice(0, 220);
       console.error(`[assistant] answer failed: ${reason}`);
-      ctx.html(200, page(ctx, { question, error: "The assistant hit an error — " + reason }));
+      // Keep upstream provider/endpoint detail server-side; the user gets a generic message.
+      ctx.html(200, page(ctx, { question, error: "The assistant hit an error. Please try again." }));
     }
   });
 }

@@ -98,7 +98,7 @@ export async function answerQuestion({ question, context, client }) {
 
 /**
  * Parse a plain-English hiring what-if into structured scenario hires.
- * @returns {Promise<Array<{department:string,role:string,start_month:string|null,annual_salary:number,count:number}>>}
+ * @returns {Promise<Array<{department:string,role:string,start_month:string|null,end_month:string|null,annual_salary:number,count:number}>>}
  */
 /** A salary basis the model may cite instead of a number; the server does the math. */
 const SALARY_BASES = ["dept_avg", "dept_median", "dept_min", "dept_max", "company_avg", "company_median"];
@@ -108,11 +108,15 @@ function resolveSalaryBasis(basis, deptName, payStats) {
   if (!basis || !payStats) return 0;
   const dept = (payStats.departments || []).find((d) => String(d.name).toLowerCase() === String(deptName).toLowerCase());
   const company = payStats.company || {};
+  // For a NEW/empty department there is no pay history, so every department-scoped
+  // basis falls back to the company figure rather than 0 (which would silently drop
+  // the hire). This is what makes "staff a brand-new team at the department average"
+  // work — it quietly means the company average until that team has real pay.
   switch (String(basis).toLowerCase()) {
-    case "dept_avg": return (dept && dept.avg) || company.avg || 0;      // fall back to company if the dept is new/empty
+    case "dept_avg": return (dept && dept.avg) || company.avg || 0;
     case "dept_median": return (dept && dept.median) || company.median || 0;
-    case "dept_min": return (dept && dept.min) || 0;
-    case "dept_max": return (dept && dept.max) || 0;
+    case "dept_min": return (dept && dept.min) || company.avg || 0;
+    case "dept_max": return (dept && dept.max) || company.avg || 0;
     case "company_avg": return company.avg || 0;
     case "company_median": return company.median || 0;
     default: return 0;
@@ -128,31 +132,37 @@ function resolveSalaryBasis(basis, deptName, payStats) {
  * number in the text is still honoured; the basis only fills the salary when the user
  * asked for a statistic.
  */
-export async function parseScenarioHires({ description, departments = [], payStats = null, now = new Date(), client }) {
+export async function parseScenarioHires({ description, departments = [], payStats = null, planHiresContext = "", now = new Date(), client }) {
   if (!client || !client.configured) throw new Error("Assistant not configured.");
   const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const statLine = payStats && payStats.departments && payStats.departments.length
-    ? "Department pay (annual base, from the roster): " +
+    ? "Department pay (annual base — roster plus this plan's planned hires): " +
       payStats.departments.map((d) => `${d.name} avg ${d.avg}, median ${d.median}, range ${d.min}-${d.max} (n=${d.count})`).join("; ") +
       `. Company avg ${payStats.company.avg}, median ${payStats.company.median}.`
     : "Department pay figures are unavailable.";
   const system =
-    "You convert a hiring what-if described in plain English into structured hires for a forward-looking plan. " +
-    'Respond with a SINGLE JSON object, either {"hires":[{"department":"","role":"","start_month":"YYYY-MM","annual_salary":0,"salary_basis":null,"count":1}]} ' +
-    'OR, when the request is ambiguous or missing key details, {"question":"<one short clarifying question>"}. Nothing else (no prose, no markdown).';
+    "You convert a hiring what-if described in plain English into structured hires for a forward-looking headcount plan. " +
+    "This is scenario planning: the department may be one that already exists OR a brand-new, hypothetical team the user is imagining — both are completely valid. " +
+    'Respond with a SINGLE JSON object, either {"hires":[{"department":"","role":"","start_month":"YYYY-MM","end_month":null,"annual_salary":0,"salary_basis":null,"count":1}]} ' +
+    'OR, when the request is genuinely ambiguous or missing something you cannot infer, {"question":"<one short clarifying question>"}. Nothing else (no prose, no markdown).';
   const user =
-`Known departments: ${departments.join(", ") || "(none)"}
+`Existing departments (roster AND any this plan already added): ${departments.join(", ") || "(none yet)"}
 ${statLine}
-The current month is ${nowMonth}.
+${planHiresContext ? planHiresContext + "\n" : ""}The current month is ${nowMonth}.
 
 Turn this into hires: ${str(description, 500)}
 
 Rules:
-- start_month must be "YYYY-MM", and it must be ${nowMonth} or LATER — never earlier. Plans only project forward from today; you cannot hire in the past. Use null if the timing is unspecified.
-- If the user asks to start someone in the past, or the timing/department/count/salary is unclear or missing, do NOT guess. Return {"question":"..."} with a single clarifying question and no hires.
-- count is an integer (default 1). Prefer an existing department name when the text clearly matches one.
-- Salary: if the text gives an explicit amount, put that plain number (no $ or commas) in "annual_salary" and leave "salary_basis" null. Salaries are ANNUAL — multiply a monthly figure by 12.
-- If instead the pay should follow a department or company statistic (e.g. "the department average", "median pay", "top of the band"), set "annual_salary" to 0 and set "salary_basis" to exactly one of: ${SALARY_BASES.join(", ")}. Do NOT compute the number yourself — the system fills it from the figures above.`;
+- DEPARTMENT: The "Existing departments" list above already includes departments this plan created out of earlier scenario hires (e.g. a Sales team that exists only inside this plan) — treat those as EXISTING, never as unknown, and never ask "which department is X?" when X is on that list. If the text clearly refers to a listed department (even loosely — "eng"→"Engineering", "sales team"→"Sales"), use that exact name. Otherwise, if the user is inventing a genuinely NEW team not on the list ("a new Partnerships function", "spin up a Legal team"), use their new name EXACTLY as written. A new department is fine — never force a new team onto an existing one. Only ask about the department if none is given or implied at all.
+- GROW TO A TOTAL: If the user asks to reach a TOTAL headcount for a role/department ("ramp up to 10 total SDRs", "get Sales to 8 people"), use the plan's existing planned hires listed above to add only the DIFFERENCE (target minus what already exists). If you cannot tell how many already exist, ask.
+- PHASED RAMP: For a staged ramp ("one per month from March 2027", "add 2 each quarter"), return one hire object per cohort with the right start_month (they can share role, department, and salary). Do not exceed the requested total.
+- SCOPE: This plan can only ADD headcount. It cannot remove, lay off, fire, or replace people. If the user asks to remove/cut/replace anyone, return {"question":"..."} explaining you can only add planned headcount, not remove it.
+- START (start_month): "YYYY-MM", and ${nowMonth} or LATER — never earlier (you cannot hire in the past). Read relative timing against the current month: "now/immediately/asap/right away" → ${nowMonth}; "next month" → the following month; "next quarter"/"Q3 2027"/"in 6 months"/"mid-2027"/"end of year" → the appropriate FUTURE month. If timing is truly unspecified, use null. If the user explicitly wants a start in the PAST, return {"question":"..."} — do not silently move it.
+- END (end_month): If the user gives a duration or an end ("for 6 months", "a 1-year contractor", "until Dec 2027", "through Q4"), set "end_month" ("YYYY-MM", on or after start_month). Otherwise null.
+- COUNT: an integer (default 1). "a pair"→2, "a handful"→5 only if clearly implied; if the count is vague ("a few", "some", "grow the team", "scale up") and you cannot infer a specific number, ask. A percentage/relative ask ("double Sales", "grow Eng 20%") also needs a concrete number — ask unless obvious.
+- MULTIPLE: One object per distinct group. A request can yield several ("2 AEs in Sales and a PM in Product" → two objects).
+- SALARY: If the text gives an explicit amount, put the plain ANNUAL number (no $/commas; "150k"→150000; a MONTHLY figure ×12) in "annual_salary" and leave "salary_basis" null. If instead pay should follow a statistic ("the department average", "median pay", "bottom/top of the band", "company average"), set "annual_salary" to 0 and "salary_basis" to exactly one of: ${SALARY_BASES.join(", ")} — do NOT compute it yourself. For a brand-new department with no pay history, a department statistic is fine: the system automatically uses the company figure. If no pay is given or implied at all, ask.
+- Return {"question":"..."} (ONE short question, no hires) only when something essential is missing or contradictory and not covered by the rules above. Otherwise return hires.`;
   const text = await client.chat(system, user, 2000);
   const obj = parseJsonObject(text);
   const rawHires = Array.isArray(obj.hires) ? obj.hires : [];
@@ -164,10 +174,14 @@ Rules:
     const sm = String(h.start_month || "");
     // Never accept a start in the past — plans only project forward.
     const start_month = /^\d{4}-\d{2}$/.test(sm) && sm >= nowMonth ? sm : null;
+    // An end month only sticks if it's a real month on/after the start (else ignore it).
+    const em = String(h.end_month || "");
+    const end_month = /^\d{4}-\d{2}$/.test(em) && (!start_month || em >= start_month) ? em : null;
     return {
       department,
       role: String(h.role || "Scenario hire").slice(0, 60).trim(),
       start_month,
+      end_month,
       annual_salary: Math.round(annual_salary),
       count: Math.max(1, Math.min(200, Number(h.count) || 1)),
     };

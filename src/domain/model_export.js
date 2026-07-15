@@ -104,8 +104,67 @@ export function modelValuesRows(model) {
 
 const csvCell = (v) => { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
 
+// The first six columns (Department, Name, Role, Status, Start, End) are free text
+// that can come from an imported roster; the rest are engine-computed numbers. Only
+// the text columns need formula-injection neutralization — prefixing a numeric cell
+// would corrupt the values table Power Query loads.
+const TEXT_COLS = 6;
+const csvTextCell = (v) => {
+  let s = String(v == null ? "" : v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return csvCell(s);
+};
+
 /** The values table as CSV (header + one row per person). */
 export function modelValuesCsv(model) {
   const { headers, rows } = modelValuesRows(model);
-  return [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return [headers, ...rows]
+    .map((r) => r.map((c, i) => (i < TEXT_COLS ? csvTextCell(c) : csvCell(c))).join(","))
+    .join("\r\n") + "\r\n";
+}
+
+// ---- per-department monthly summary (a stable, linkable "mini model") --------
+// The same month columns as the detail export, but aggregated to two rows per
+// department — Headcount (a count) and Cost (a sum) — plus TOTAL rows. Its row count
+// tracks the number of DEPARTMENTS, not people, so adding headcount never moves a cell;
+// a formula in Excel pointing at "Sales / Cost / Mar 2027" keeps pointing there. Pass
+// `deptOrder` (creation order) so a brand-new department appends at the bottom instead
+// of shuffling the rows an alphabetical sort would.
+export function modelSummaryMatrix(model, deptOrder = null) {
+  const { departments = [], deptMonthlyCost = {}, roster = [], cols = [], totalMonthlyCost = [], monthlyHeadcount = [] } = model;
+  // Per-department monthly headcount (a person present that month counts as 1).
+  const hc = {};
+  for (const d of departments) hc[d] = cols.map(() => 0);
+  for (const r of roster) {
+    const arr = hc[r.department];
+    if (arr) for (let i = 0; i < cols.length; i++) if (r.present && r.present[i]) arr[i] += 1;
+  }
+  // Stable department order: those named in deptOrder first (in that order), then any
+  // remaining model departments (e.g. plan-only scenario teams) in the model's order.
+  const inModel = new Set(departments);
+  const ordered = [];
+  if (Array.isArray(deptOrder)) for (const d of deptOrder) if (inModel.has(d) && !ordered.includes(d)) ordered.push(d);
+  for (const d of departments) if (!ordered.includes(d)) ordered.push(d);
+
+  const round = (v) => Math.round(Number(v) || 0);
+  const headers = ["Department", "Metric", ...cols.map((c) => c.fullLabel)];
+  const rows = [];
+  for (const d of ordered) {
+    rows.push([d, "Headcount", ...(hc[d] || cols.map(() => 0)).map(round)]);
+    rows.push([d, "Cost", ...(deptMonthlyCost[d] || cols.map(() => 0)).map(round)]);
+  }
+  const totals = [
+    ["TOTAL", "Headcount", ...monthlyHeadcount.map(round)],
+    ["TOTAL", "Cost", ...totalMonthlyCost.map(round)],
+  ];
+  return { headers, rows, totals };
+}
+
+/** The monthly per-department summary as CSV: header, two rows per department
+ *  (Headcount, Cost), then the two TOTAL rows. */
+export function modelSummaryCsv(model, deptOrder = null) {
+  const { headers, rows, totals } = modelSummaryMatrix(model, deptOrder);
+  return [headers, ...rows, ...totals]
+    .map((r) => r.map((c, i) => (i < 2 ? csvTextCell(c) : csvCell(c))).join(","))
+    .join("\r\n") + "\r\n";
 }

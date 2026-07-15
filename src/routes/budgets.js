@@ -58,7 +58,7 @@ export function registerBudgetRoutes(router) {
       // Excel live-link context: the export token + public base so a "Link to Excel"
       // popup can show the pull URL for this exact view (Actual or a specific plan).
       exportToken: canSetBudgets(ctx.user) ? (getExportToken(ctx.db)?.token || null) : null,
-      publicUrl: ctx.config.PUBLIC_URL || `http://localhost:${ctx.config.PORT}`,
+      publicUrl: ctx.config.PUBLIC_URL || "https://headcounthq.onrender.com",
       aiReady: Boolean(ctx.config.aiImportConfigured), ...extra,
     }));
   };
@@ -414,10 +414,39 @@ export function registerBudgetRoutes(router) {
     if (!desc) return { question: "Tell me who to add — a department, how many, a start month, and a salary." };
     if (!ctx.config.aiImportConfigured) return { error: "The AI isn't configured on the server." };
     const client = clientFromConfig(ctx.config);
-    const payStats = departmentPayStats(listEmployees(ctx.db, {}));
     const now = new Date();
     const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const parsed = await parseScenarioHires({ description: desc, departments: listDepartments(ctx.db).map((d) => d.name), payStats, now, client });
+
+    // ---- Make the AI aware of THIS plan's own world (plan-local, never cross-plan) ----
+    // A plan can invent departments purely through scenario hires (e.g. a Sales team with
+    // no real roster). Fold this plan's existing hires into the department list AND the pay
+    // figures so the AI recognises those departments and can price "the same as the others"
+    // / "the department average". Scoped to `plan`, so a department created in Plan A never
+    // shows up (or gets grown) while working in Plan B.
+    const existingHires = planHires(plan);
+    const roster = listEmployees(ctx.db, {});
+    const scenarioRows = existingHires.map((h) => ({ department_name: h.department, annual_salary: Number(h.annual_salary) || 0 }));
+    const payStats = departmentPayStats([...roster, ...scenarioRows]);
+    const realDepts = listDepartments(ctx.db).map((d) => d.name);
+    const planDepts = [...new Set(existingHires.map((h) => String(h.department || "").trim()).filter(Boolean))];
+    const departments = [...new Set([...realDepts, ...planDepts])];
+
+    // A compact summary of what this plan already plans to hire, so "ramp up to N total"
+    // and "same pay as the other SDRs" have something concrete to build on.
+    const groups = new Map();
+    for (const h of existingHires) {
+      const key = `${h.department}||${(h.role || "Hire")}`;
+      const g = groups.get(key) || { dept: h.department, role: h.role || "Hire", count: 0, salSum: 0, salN: 0 };
+      g.count += 1;
+      if (Number(h.annual_salary) > 0) { g.salSum += Number(h.annual_salary); g.salN += 1; }
+      groups.set(key, g);
+    }
+    const planHiresContext = groups.size
+      ? "This plan already includes these planned hires: "
+        + [...groups.values()].map((g) => `${g.count}× ${g.role} in ${g.dept}${g.salN ? " at ~" + Math.round(g.salSum / g.salN) + "/yr" : ""}`).join("; ") + "."
+      : "";
+
+    const parsed = await parseScenarioHires({ description: desc, departments, payStats, planHiresContext, now, client });
     if (parsed.question) return { question: parsed.question };
     if (!parsed.length) return { question: 'I need a little more: which department, how many, a start month, and a salary (a number, or say "the department average").' };
     const problems = [];
@@ -553,6 +582,16 @@ export function colLetter(n) { let s = ""; n += 1; while (n > 0) { const m = (n 
 /** CSV-escape. Formulas below contain no comma/quote, so they pass through unquoted
  *  and Excel/Sheets parse them as formulas rather than text. */
 function csvCell(v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+// Columns 0-5 (Department, Name, Role, Status, Start, End) are free text that may
+// come from an imported roster; columns 6+ are the engine's own live formulas
+// ("=...") and MUST pass through untouched. Neutralize formula-injection only on
+// the text columns so a malicious roster value can't execute in Excel/Sheets.
+const TEXT_COLS = 6;
+function csvTextCell(v) {
+  let s = String(v == null ? "" : v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return csvCell(s);
+}
 /**
  * The model as a *live* spreadsheet: annual base is the only hardcoded number per
  * person. Loaded monthly is `=D<row>/12*<load>`, each active month references it,
@@ -560,7 +599,9 @@ function csvCell(v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/
  */
 export function modelToFormulaCsv(model) {
   const rows = modelMatrixCells(model); // linked formula cells shared with the Excel push
-  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return rows
+    .map((r) => r.map((c, i) => (i < TEXT_COLS ? csvTextCell(c) : csvCell(c))).join(","))
+    .join("\r\n") + "\r\n";
 }
 
 const bar = (used, budget, over) => {
@@ -655,6 +696,7 @@ function page(ctx, mode) {
         });
     body = html`${head}
       ${noDepts || !editable ? "" : html`<form method="post" action="/budgets/fill-from-headcount" class="inline" style="margin:0 0 14px">
+        ${csrfField(ctx)}<button class="btn ghost" type="submit">↳ Fill money budgets from the headcount budget</button>
         ${csrfField(ctx)}<button class="btn ghost" type="submit">↳ Fill money budgets from the headcount budget</button>
         <span class="muted small" style="margin-left:8px">Sets each department's money budget to cover its budgeted positions (current cost + the implied cost of unfilled ones).</span>
       </form>`}

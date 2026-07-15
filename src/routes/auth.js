@@ -1,13 +1,18 @@
 import { html } from "../html.js";
 import { renderAuthPage, csrfField, errorList } from "../views/ui.js";
 import { countUsers, getUserByEmail, createUserWithPassword, touchLogin, setPassword, getUserById } from "../repos/users.js";
-import { verifyPassword, passwordProblem } from "../auth/passwords.js";
+import { verifyPassword, passwordProblem, hashPassword } from "../auth/passwords.js";
 import { createSession, destroySession } from "../auth/sessions.js";
 import { getInviteByToken, markInviteAccepted } from "../repos/invites.js";
 import { logAudit } from "../repos/audit.js";
 import { tooManyAttempts, clearAttempts } from "../auth/ratelimit.js";
 import { clientIp } from "../middleware.js";
 import { SESSION_COOKIE } from "../constants.js";
+
+// A fixed decoy hash so that a login attempt for a non-existent or disabled account
+// still performs one scrypt derivation — otherwise the response time reveals which
+// emails belong to real, active accounts (user enumeration).
+const LOGIN_DECOY = hashPassword("timing-equalizer-never-matches");
 
 const startSession = (ctx, user, { mfaPending = false } = {}) => {
   const { token } = createSession(ctx.db, user.id, { ip: clientIp(ctx.req), userAgent: ctx.req.headers["user-agent"] || "", mfaPending });
@@ -49,7 +54,12 @@ export function registerAuthRoutes(router) {
       return ctx.html(429, loginForm(ctx, { errors: ["Too many attempts. Wait a few minutes and try again."], email }));
     }
     const user = getUserByEmail(ctx.db, email);
-    const ok = user && user.status === "active" && verifyPassword(password, user.password_hash, user.password_salt);
+    const active = !!user && user.status === "active";
+    // Always run a scrypt verify (decoy when there's no active user) so timing does
+    // not distinguish real/active accounts from unknown or disabled ones.
+    const ok = active
+      ? verifyPassword(password, user.password_hash, user.password_salt)
+      : (verifyPassword(password, LOGIN_DECOY.hash, LOGIN_DECOY.salt), false);
     if (!ok) {
       logAudit(ctx.db, { userId: user ? user.id : null, action: "login.failed", entity: "user", detail: { email } });
       return ctx.html(401, loginForm(ctx, { errors: ["Incorrect email or password."], email }));
@@ -94,6 +104,13 @@ export function registerAuthRoutes(router) {
     setPassword(ctx.db, user.id, password, { mustChange: false });
     markInviteAccepted(ctx.db, inv.id);
     logAudit(ctx.db, { userId: user.id, action: "invite.accepted", entity: "user", entityId: user.id });
+    // An invite/password link must never skip an already-enrolled second factor.
+    // New users (totp_enabled = 0) still get a full session and land on "/"; a
+    // re-invited account that has 2FA on starts pending and is held at /login/2fa.
+    if (user.totp_enabled) {
+      startSession(ctx, user, { mfaPending: true });
+      return ctx.redirect("/login/2fa");
+    }
     startSession(ctx, user);
     ctx.redirect("/");
   });

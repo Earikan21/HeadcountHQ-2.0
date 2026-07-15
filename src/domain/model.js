@@ -234,7 +234,9 @@ export function buildHeadcountModel({ employees = [], loadedMultiplier = 1.2, st
     return { year: yr, totalCost, avgHc, yearEndHc, avgCostPerHead, months: idxs.length };
   });
 
-  return { cols, roster, departments, deptMonthlyCost, totalMonthlyCost, monthlyHeadcount, benefitsPct, mult: globalMult, years, months, start };
+  // Index of the current month within the window (clamped), for "as of now" summaries.
+  const nowIndex = Math.max(0, Math.min(cols.length - 1, absOf(now.getFullYear(), now.getMonth()) - startAbs));
+  return { cols, roster, departments, deptMonthlyCost, totalMonthlyCost, monthlyHeadcount, benefitsPct, mult: globalMult, years, months, start, nowIndex };
 }
 
 /**

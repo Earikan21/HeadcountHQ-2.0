@@ -3,6 +3,12 @@
 export const listDepartments = (db) =>
   db.prepare("SELECT * FROM departments ORDER BY name").all();
 
+/** Departments in creation order (by id). Used where a STABLE order matters — e.g. the
+ *  Excel summary, so a newly-added department appends at the bottom instead of shuffling
+ *  the existing rows the way an alphabetical sort would. */
+export const listDepartmentsByCreation = (db) =>
+  db.prepare("SELECT * FROM departments ORDER BY id").all();
+
 export const getDepartment = (db, id) =>
   db.prepare("SELECT * FROM departments WHERE id = ?").get(id);
 

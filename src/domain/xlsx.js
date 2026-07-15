@@ -72,7 +72,11 @@ export function unzip(buf) {
     const start = localOff + 30 + lNameLen + lExtraLen;
     const raw = buf.subarray(start, start + compSize);
     if (method === 0) out.set(name, Buffer.from(raw));
-    else if (method === 8) out.set(name, inflateRawSync(raw));
+    // Cap the inflated size so a "zip bomb" (a tiny deflate stream that expands to
+    // gigabytes) can't OOM-crash the single-process server. 64 MB is far above any
+    // real sharedStrings/sheet part; exceeding it throws ERR_BUFFER_TOO_LARGE, which
+    // the caller already catches and surfaces as a clean "unreadable file" error.
+    else if (method === 8) out.set(name, inflateRawSync(raw, { maxOutputLength: 64 * 1024 * 1024 }));
     // any other method: skip the entry rather than fail the whole workbook
   }
   if (!out.size) throw new Error("Not a readable .xlsx file (no entries).");

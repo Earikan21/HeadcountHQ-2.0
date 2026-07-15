@@ -10,10 +10,11 @@ import { requirePermission } from "../middleware.js";
 import { canManageAccounts } from "../authz.js";
 import { getToken, rotateToken, deleteToken, tokenValid } from "../repos/export_tokens.js";
 import { listEmployees } from "../repos/roster.js";
+import { listDepartmentsByCreation } from "../repos/departments.js";
 import { getSettings } from "../repos/settings.js";
 import { buildHeadcountModel, applyPlanOverrides } from "../domain/model.js";
 import { getPlan, planHires, planOverrides, planAssumptions } from "../repos/plans.js";
-import { modelValuesCsv } from "../domain/model_export.js";
+import { modelValuesCsv, modelSummaryCsv } from "../domain/model_export.js";
 import { effectiveDeptName } from "../domain/focus.js";
 import { logAudit } from "../repos/audit.js";
 
@@ -22,20 +23,17 @@ import { logAudit } from "../repos/audit.js";
  *  unset we assume the common local case — server and Excel on the same machine — and
  *  use localhost on the configured port, which actually resolves. */
 export function publicBase(config) {
-  return config.PUBLIC_URL || `http://localhost:${config.PORT}`;
+  return config.PUBLIC_URL || "https://headcounthq.onrender.com";
 }
 
 function exportUrl(ctx, token) {
   return `${publicBase(ctx.config)}/export/model.csv?token=${token}`;
 }
 
-export function registerExcelRoutes(router) {
-  // --- The data endpoint Power Query fetches. Token-authed, no session/cookie. ---
-  router.get("/export/model.csv", (ctx) => {
-    const token = ctx.query.get("token") || "";
-    if (!tokenValid(ctx.db, token)) {
-      return ctx.send(401, "text/plain; charset=utf-8", "Invalid or missing token.");
-    }
+  // Build the model for this export request (token already checked). Honours ?version
+  // (a plan) and ?dept / the workspace focus lock. Shared by the detail + summary feeds
+  // so both always describe exactly the same scope.
+  function exportModel(ctx) {
     const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
     const versionId = Number(ctx.query.get("version")) || null;
     const plan = versionId ? getPlan(ctx.db, versionId) : null;
@@ -47,8 +45,45 @@ export function registerExcelRoutes(router) {
     const hires = plan ? planHires(plan) : [];
     const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
     const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions: plan ? planAssumptions(plan) : {} });
+    return { model, plan };
+  }
+
+  // A stable department order for the summary: real departments in creation order, then
+  // any plan-only (scenario) departments in the order the plan added them — so a brand-new
+  // department lands at the bottom rather than shuffling the existing rows.
+  function summaryDeptOrder(ctx, plan) {
+    const real = listDepartmentsByCreation(ctx.db).map((d) => d.name);
+    const scenario = plan ? planHires(plan).map((h) => h.department).filter(Boolean) : [];
+    const order = [...real];
+    for (const d of scenario) if (!order.includes(d)) order.push(d);
+    return order;
+  }
+
+export function registerExcelRoutes(router) {
+  // --- The data endpoint Power Query fetches. Token-authed, no session/cookie. ---
+  router.get("/export/model.csv", (ctx) => {
+    const token = ctx.query.get("token") || "";
+    if (!tokenValid(ctx.db, token)) {
+      return ctx.send(401, "text/plain; charset=utf-8", "Invalid or missing token.");
+    }
+    // This response carries full compensation data behind a bearer token in the URL.
+    // Forbid any shared/proxy/browser caching so the payload isn't retained downstream.
+    ctx.res.setHeader("Cache-Control", "no-store");
     // Power Query re-fetches this on Refresh; a values table, not formulas.
-    ctx.send(200, "text/csv; charset=utf-8", modelValuesCsv(model));
+    ctx.send(200, "text/csv; charset=utf-8", modelValuesCsv(exportModel(ctx).model));
+  });
+
+  // --- Monthly per-department summary: Headcount + Cost per department for every month,
+  //     plus TOTAL rows. A separate "mini model" so links to it stay put when you add
+  //     headcount (rows track departments, not people). ---
+  router.get("/export/summary.csv", (ctx) => {
+    const token = ctx.query.get("token") || "";
+    if (!tokenValid(ctx.db, token)) {
+      return ctx.send(401, "text/plain; charset=utf-8", "Invalid or missing token.");
+    }
+    ctx.res.setHeader("Cache-Control", "no-store");
+    const { model, plan } = exportModel(ctx);
+    ctx.send(200, "text/csv; charset=utf-8", modelSummaryCsv(model, summaryDeptOrder(ctx, plan)));
   });
 
   // --- Admin: manage the link + token ---

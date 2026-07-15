@@ -123,7 +123,11 @@ export function parseCsv(text) {
 /** Serialize array-of-objects to CSV using the given column order. */
 export function toCsv(columns, rows) {
   const esc = (v) => {
-    const str = v == null ? "" : String(v);
+    let str = v == null ? "" : String(v);
+    // Neutralize spreadsheet formula/DDE injection: a cell that opens with a
+    // formula trigger is prefixed with a single quote so Excel/Sheets treats it
+    // as text. Roster export cells are labels/dates/whole numbers, never formulas.
+    if (/^[=+\-@\t\r]/.test(str)) str = "'" + str;
     return /[",\n\r]/.test(str) ? '"' + str.replaceAll('"', '""') + '"' : str;
   };
   const lines = [columns.join(",")];
