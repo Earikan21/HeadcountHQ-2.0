@@ -1,0 +1,30 @@
+import { startTestServer, makeClient } from "./tests/helpers.js";
+let lastPrompt = "";
+const realFetch = globalThis.fetch;
+const srv = await startTestServer({ AI_IMPORT_API_KEY: "k", AI_IMPORT_PROVIDER: "anthropic" });
+globalThis.fetch = async (_u, opts) => {
+  const body = JSON.parse(opts.body);
+  lastPrompt = body.messages[body.messages.length - 1].content;
+  const text = /Sales/.test(lastPrompt) ? JSON.stringify({hires:[{department:"Sales",role:"SDR",start_month:"2027-04",annual_salary:0,salary_basis:"dept_avg",count:1}]}) : JSON.stringify({question:"q?"});
+  return { ok: true, json: async () => ({ content: [{ type: "text", text }] }) };
+};
+const a = makeClient(srv.base);
+await a.get("/setup"); await a.post("/setup", { name:"Ada", email:"ada@acme.co", password:"supersecret123" });
+await a.post("/philosophy", { ai_import_enabled:"on", ai_provider:"anthropic" });
+const CSV = "Employee ID,Name,Department,Compensation Amount,Compensation Unit\nE-1,Dana,Engineering,180000,Annual";
+await a.get("/roster/import");
+const up = await a.upload("/roster/import", {}, { field:"file", filename:"r.csv", content: CSV });
+const id = up.headers.get("location").match(/import\/(\d+)\/map/)[1];
+await a.post(`/roster/import/${id}/map`, { map_employee_id:"Employee ID", map_name:"Name", map_department:"Department", map_compensation_amount:"Compensation Amount", map_compensation_unit:"Compensation Unit" });
+await a.post(`/roster/import/${id}/commit`, {});
+const planA = Number((await a.post("/model/versions",{name:"Plan A"})).headers.get("location").match(/version=(\d+)/)[1]);
+const planB = Number((await a.post("/model/versions",{name:"Plan B"})).headers.get("location").match(/version=(\d+)/)[1]);
+console.log("planA", planA, "planB", planB);
+await a.post(`/model/versions/${planA}/hire`, { scn_department:"Sales", scn_role:"SDR", scn_start:"2027-03", scn_salary:"120000", scn_count:"1" });
+// ask Plan B
+const res = await a.post(`/model/versions/${planB}/ai.json`, { messages: JSON.stringify([{role:"user",text:"add someone"}]) });
+console.log("planB ai.json status", res.status);
+console.log("=== Plan B prompt (first 400 chars) ===");
+console.log(lastPrompt.slice(0,400));
+console.log("planB hires:", srv.db.prepare("SELECT hires_json FROM plan_versions WHERE id=?").get(planB).hires_json);
+await srv.close(); globalThis.fetch = realFetch;

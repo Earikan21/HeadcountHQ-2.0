@@ -99,5 +99,6 @@ test("the prompt actually carries the department figures to the model", async ()
     client: { configured: true, chat: async (_sys, user) => { seen = user; return JSON.stringify({ hires: [] }); } },
   });
   assert.match(seen, /Engineering avg 360000/, "the real average is in the prompt");
-  assert.match(seen, /Salaries are ANNUAL/, "and the annual/monthly instruction");
+  assert.match(seen, /ANNUAL number/, "carries the annual-salary instruction");
+  assert.match(seen, /MONTHLY figure ×12/, "and how to annualize a monthly figure");
 });

@@ -13,6 +13,8 @@ services:
         value: "true"
       - key: DATABASE_PATH
         value: /data/headcount.sqlite
+      - key: PUBLIC_URL
+        value: https://headcounthq.onrender.com   # used to build the Excel Power Query link
     disk:
       name: data             # persistent disk so the database survives redeploys
       mountPath: /data

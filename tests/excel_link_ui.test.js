@@ -68,3 +68,33 @@ test("the export honours ?version — a plan pulls the plan's model", async () =
   // a bad version just returns Actual (no crash)
   assert.equal((await anon.get(`/export/model.csv?token=${t}&version=99999`)).status, 200);
 });
+
+test("with a department selected, the popup offers a scoped URL AND an all-departments URL", async () => {
+  const t = token();
+  const page = await (await admin.get(`/model?version=${planId}&dept=Engineering`)).text();
+  // scoped URL carries &dept=Engineering (& is &amp; in the attribute)
+  assert.match(page, new RegExp(`/export/model\\.csv\\?token=${t}&amp;version=${planId}&amp;dept=Engineering`));
+  // and the all-departments URL (no &dept) is offered too
+  assert.match(page, new RegExp(`/export/model\\.csv\\?token=${t}&amp;version=${planId}"`));
+  assert.match(page, /just this department/i);
+  // a stable per-department summary feed is offered too
+  assert.match(page, new RegExp(`/export/summary\\.csv\\?token=${t}&amp;version=${planId}`));
+  assert.match(page, /Monthly summary/);
+});
+
+test("the export honours ?dept — a scoped URL returns only that department", async () => {
+  const t = token();
+  const anon = makeClient(srv.base);
+  const engOnly = await (await anon.get(`/export/model.csv?token=${t}&dept=Engineering`)).text();
+  assert.match(engOnly, /Dana/, "Engineering person present");
+  // Header row + Dana only (no other department rows)
+  assert.ok(!/,Sales,/.test(engOnly), "no Sales rows in an Engineering-scoped export");
+});
+
+test("the URL falls back to the Render address when PUBLIC_URL is unset", async () => {
+  // This suite sets PUBLIC_URL, so assert the fallback constant exists in the code path
+  // indirectly: a server with no PUBLIC_URL uses headcounthq.onrender.com.
+  const bare = await import("../src/routes/excel.js");
+  assert.equal(bare.publicBase({ PUBLIC_URL: "", PORT: 3000 }), "https://headcounthq.onrender.com");
+  assert.equal(bare.publicBase({ PUBLIC_URL: "https://x.example.com" }), "https://x.example.com");
+});

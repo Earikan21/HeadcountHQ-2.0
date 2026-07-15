@@ -79,15 +79,16 @@ test("an end before the start is refused, for hires and for real people", () => 
 });
 
 test("bad input is rejected with a message, before anything is written", () => {
-  assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "-5" }).error, /negative/);
+  assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "-5" }).error, /greater than 0/);
   assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "abc" }).error, /must be a number/);
-  assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "" }).error, /Enter a salary/);
+  assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "" }).error, /greater than 0/);
   assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "999999999999" }).error, /typo/);
   assert.match(parseCellEdit({ key: "emp:E-1", field: "start", value: "June" }).error, /month like/);
   assert.match(parseCellEdit({ key: "emp:E-1", field: "department", value: "x" }).error, /isn't editable/);
   assert.match(parseCellEdit({ key: "nonsense", field: "name", value: "x" }).error, /Unknown row/);
   assert.match(parseCellEdit({ key: "emp:E-1", field: "name", value: "x".repeat(81) }).error, /under 80/);
-  assert.equal(parseCellEdit({ key: "emp:E-1", field: "salary", value: "0" }).value, 0, "zero is a legal salary");
+  // 0 is no longer a legal salary — it must be rejected like negatives.
+  assert.match(parseCellEdit({ key: "emp:E-1", field: "salary", value: "0" }).error, /greater than 0/);
 });
 
 test("editing an unknown row or a vanished hire fails loudly", () => {
@@ -229,7 +230,7 @@ test("removing a hire deletes it by id, not by position", async () => {
 
 test("the endpoint rejects bad values and writes nothing", async () => {
   const before = JSON.stringify(overridesOf(planA));
-  for (const [field, value, re] of [["salary", "-1", /negative/], ["salary", "abc", /number/], ["start", "nope", /month like/], ["end", "1999-01", /can't come before/]]) {
+  for (const [field, value, re] of [["salary", "-1", /greater than 0/], ["salary", "0", /greater than 0/], ["salary", "abc", /number/], ["start", "nope", /month like/], ["end", "1999-01", /can't come before/]]) {
     if (field === "end") await cell(planA, "emp:E-1", "start", "2024-06"); // give them a start to violate
     const res = await cell(planA, "emp:E-1", field, value);
     assert.equal(res.status, 400, `${field}=${value} must be refused`);
