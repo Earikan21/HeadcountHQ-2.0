@@ -696,10 +696,15 @@ details.asm-sect:not([open]) > summary::before { content: "▸"; }
 .focus-note { color: var(--muted); font-size: 13px; }
 
 /* ---- P&L tab ---- */
-.pnl-grid { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 20px; align-items: start; }
-@media (max-width: 900px) { .pnl-grid { grid-template-columns: 1fr; } }
+/* Levers on top (full width), outputs below — a side-by-side grid crushed the
+   lever inputs into an unreadable column. */
+.pnl-grid { display: block; }
+.pnl-col-in { margin-bottom: 22px; }
 .pnl-inputs h2 { margin-top: 0; }
-.pnl-inputs input[type="number"] { width: 120px; text-align: right; }
-.pnl-inputs .inline { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
-.pnl-quota { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
-.pnl-quota input { width: 160px; }
+.pnl-inputs table { width: 100%; }
+.pnl-inputs th, .pnl-inputs td { padding: 8px 10px; vertical-align: middle; }
+.pnl-inputs input[type="number"] { width: 140px; text-align: right; padding: 6px 8px; }
+.pnl-inputs .inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.pnl-quota { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
+.pnl-quota label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.pnl-quota input { width: 180px; padding: 6px 8px; }
