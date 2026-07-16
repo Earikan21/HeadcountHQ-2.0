@@ -66,6 +66,7 @@ function navGroups(user, active, features = {}, modelNav = null) {
       model.addPlan = modelNav.canEdit;
     }
     const plan = [model];
+    if (canViewBudgets(user)) plan.push(I("/model/pnl", "P&L", "pnl"));
     if (features.planning) plan.push(I("/planning", "Planning", "planning"));
     groups.push({ label: "Model", items: plan });
   }

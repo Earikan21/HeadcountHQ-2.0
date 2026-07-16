@@ -299,6 +299,7 @@ export function financialModelPage(ctx, model, extra = {}) {
     ${editable ? raw('<span id="save-pill" class="save-pill" role="status" aria-live="polite" hidden></span>') : ""}
     ${extra.canEdit ? raw('<button type="button" class="btn ghost sm" data-open-modal="excel-link">Link to Excel</button>') : ""}
     <a class="btn ghost sm" href="${q("/budgets/export.csv")}">Export CSV</a>
+    <a class="btn ghost sm" href="${q("/budgets/pnl-template.csv")}" title="Downloadable profit/loss template: headcount &amp; cost per department, blank benefit levers, and a diminishing-returns calculator">P&amp;L template</a>
   </div>`;
 
   // Fully-loaded cost is editable everywhere — on Actual it sets the workspace default;

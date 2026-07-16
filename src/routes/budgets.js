@@ -7,7 +7,8 @@ import {
   setCompanyHeadcount, setCompanyMoney, setEnvelopeHeadcount, setEnvelopeMoney,
 } from "../repos/budgets.js";
 import { expectedRange } from "../domain/budget.js";
-import { listDepartments } from "../repos/departments.js";
+import { listDepartments, listDepartmentsByCreation } from "../repos/departments.js";
+import { pnlTemplateCsv } from "../domain/pnl_template.js";
 import { getSettings, updateSettings } from "../repos/settings.js";
 import { financialModelPage } from "../views/model.js";
 import { buildHeadcountModel, applyPlanOverrides, periodBuckets, periodize, yearGroupsOf, modelKpis, windowKey } from "../domain/model.js";
@@ -568,6 +569,29 @@ export function registerBudgetRoutes(router) {
     logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.exported", entity: "plan_version", detail: { rows: model.roster.length, version: versionId, dept } });
     ctx.attachment("financial-model.csv", "text/csv; charset=utf-8", modelToFormulaCsv(model));
   });
+
+  // A fill-in profit/loss template: headcount + cost per department (from the model),
+  // blank benefit/diminishing-return levers, benefit/net/profit-loss formulas, and a
+  // per-department calculator that fits the levers from historical numbers. A download
+  // (open in Excel) — not the live Power Query feed, so your inputs aren't overwritten.
+  router.get("/budgets/pnl-template.csv", (ctx) => {
+    if (!requirePermission(ctx, canViewBudgets)) return;
+    const versionId = currentVersionId(ctx);
+    const current = versionId ? getPlan(ctx.db, versionId) : null;
+    const hires = planHires(current);
+    const allEmployees = applyPlanOverrides(listEmployees(ctx.db, {}), current ? planOverrides(current) : {});
+    const dept = effectiveDeptName(ctx, ctx.query.get("dept"));
+    const employees = dept ? allEmployees.filter((e) => (e.department_name || "(none)") === dept) : allEmployees;
+    const scopedHires = dept ? hires.filter((h) => h.department === dept) : hires;
+    const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
+    const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions: current ? planAssumptions(current) : {} });
+    // Stable department order so a new department appends at the bottom of the template.
+    const realOrder = listDepartmentsByCreation(ctx.db).map((d) => d.name);
+    const order = [...realOrder];
+    for (const h of hires) if (h.department && !order.includes(h.department)) order.push(h.department);
+    logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.pnl_template", entity: "plan_version", detail: { version: versionId, dept } });
+    ctx.attachment("pnl-template.csv", "text/csv; charset=utf-8", pnlTemplateCsv(model, order));
+  });
 }
 
 /** Model length in years: clamp into 1..10; only a missing/blank value defaults to 5. */
@@ -696,7 +720,6 @@ function page(ctx, mode) {
         });
     body = html`${head}
       ${noDepts || !editable ? "" : html`<form method="post" action="/budgets/fill-from-headcount" class="inline" style="margin:0 0 14px">
-        ${csrfField(ctx)}<button class="btn ghost" type="submit">↳ Fill money budgets from the headcount budget</button>
         ${csrfField(ctx)}<button class="btn ghost" type="submit">↳ Fill money budgets from the headcount budget</button>
         <span class="muted small" style="margin-left:8px">Sets each department's money budget to cover its budgeted positions (current cost + the implied cost of unfilled ones).</span>
       </form>`}
