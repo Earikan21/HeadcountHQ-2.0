@@ -566,8 +566,10 @@ export function registerBudgetRoutes(router) {
     const assumptions = current ? planAssumptions(current) : {};
     const mult = Number(getSettings(ctx.db).loaded_cost_multiplier) || 1.2;
     const model = buildHeadcountModel({ employees, loadedMultiplier: mult, scenarioHires: scopedHires, assumptions });
-    logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.exported", entity: "plan_version", detail: { rows: model.roster.length, version: versionId, dept } });
-    ctx.attachment("financial-model.csv", "text/csv; charset=utf-8", modelToFormulaCsv(model));
+    // Match the on-screen period: monthly, quarterly, or yearly columns.
+    const period = ["month", "quarter", "year"].includes(String(ctx.query.get("period"))) ? String(ctx.query.get("period")) : "month";
+    logAudit(ctx.db, { userId: ctx.user.id, action: "budgets.exported", entity: "plan_version", detail: { rows: model.roster.length, version: versionId, dept, period } });
+    ctx.attachment("financial-model.csv", "text/csv; charset=utf-8", modelToFormulaCsv(model, period));
   });
 
   // A fill-in profit/loss template: headcount + cost per department (from the model),
@@ -621,8 +623,10 @@ function csvTextCell(v) {
  * person. Loaded monthly is `=D<row>/12*<load>`, each active month references it,
  * and every total is a `=SUM(...)` over the person rows.
  */
-export function modelToFormulaCsv(model) {
-  const rows = modelMatrixCells(model); // linked formula cells shared with the Excel push
+export function modelToFormulaCsv(model, period = "month") {
+  // Monthly by default; quarterly/yearly aggregates the month columns into period buckets.
+  const buckets = period === "quarter" || period === "year" ? periodBuckets(model.cols, period) : null;
+  const rows = modelMatrixCells(model, buckets); // linked formula cells shared with the Excel push
   return rows
     .map((r) => r.map((c, i) => (i < TEXT_COLS ? csvTextCell(c) : csvCell(c))).join(","))
     .join("\r\n") + "\r\n";

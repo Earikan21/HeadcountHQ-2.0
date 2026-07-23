@@ -154,12 +154,12 @@ Turn this into hires: ${str(description, 500)}
 
 Rules:
 - DEPARTMENT: The "Existing departments" list above already includes departments this plan created out of earlier scenario hires (e.g. a Sales team that exists only inside this plan) — treat those as EXISTING, never as unknown, and never ask "which department is X?" when X is on that list. If the text clearly refers to a listed department (even loosely — "eng"→"Engineering", "sales team"→"Sales"), use that exact name. Otherwise, if the user is inventing a genuinely NEW team not on the list ("a new Partnerships function", "spin up a Legal team"), use their new name EXACTLY as written. A new department is fine — never force a new team onto an existing one. Only ask about the department if none is given or implied at all.
-- GROW TO A TOTAL: If the user asks to reach a TOTAL headcount for a role/department ("ramp up to 10 total SDRs", "get Sales to 8 people"), use the plan's existing planned hires listed above to add only the DIFFERENCE (target minus what already exists). If you cannot tell how many already exist, ask.
-- PHASED RAMP: For a staged ramp ("one per month from March 2027", "add 2 each quarter"), return one hire object per cohort with the right start_month (they can share role, department, and salary). Do not exceed the requested total.
+- GROW TO A TOTAL: This applies ONLY when the user explicitly asks for a TOTAL ("ramp up to 10 total SDRs", "get Sales to 8 people", "take CS to 12"): add exactly (target − how many already exist), never below 0. A plain "add N" / "hire N" is NOT a total — just add N. If you cannot tell how many already exist, ask.
+- PHASED RAMP: For a staged ramp ("one per month", "add 2 each quarter"), the hires must STILL sum to exactly the requested count — N hires one-per-month is exactly N cohorts, no more (mind the fencepost). Give each cohort the right start_month; they can share role, department, and salary.
 - SCOPE: This plan can only ADD headcount. It cannot remove, lay off, fire, or replace people. If the user asks to remove/cut/replace anyone, return {"question":"..."} explaining you can only add planned headcount, not remove it.
 - START (start_month): "YYYY-MM", and ${nowMonth} or LATER — never earlier (you cannot hire in the past). Read relative timing against the current month: "now/immediately/asap/right away" → ${nowMonth}; "next month" → the following month; "next quarter"/"Q3 2027"/"in 6 months"/"mid-2027"/"end of year" → the appropriate FUTURE month. If timing is truly unspecified, use null. If the user explicitly wants a start in the PAST, return {"question":"..."} — do not silently move it.
 - END (end_month): If the user gives a duration or an end ("for 6 months", "a 1-year contractor", "until Dec 2027", "through Q4"), set "end_month" ("YYYY-MM", on or after start_month). Otherwise null.
-- COUNT: an integer (default 1). "a pair"→2, "a handful"→5 only if clearly implied; if the count is vague ("a few", "some", "grow the team", "scale up") and you cannot infer a specific number, ask. A percentage/relative ask ("double Sales", "grow Eng 20%") also needs a concrete number — ask unless obvious.
+- COUNT: the number of NEW hires to add. When the user gives an explicit number ("add 9 SDRs"), the counts across your hire objects must sum to EXACTLY that number — never one more, never one fewer. Do NOT re-add people already in the plan; the "already includes" context is ONLY for the grow-to-a-total case above. "a pair"→2, "a handful"→5 only if clearly implied; if the count is vague ("a few", "some", "grow the team", "scale up") or relative ("double Sales", "grow Eng 20%") and you cannot infer an exact number, ask.
 - MULTIPLE: One object per distinct group. A request can yield several ("2 AEs in Sales and a PM in Product" → two objects).
 - SALARY: If the text gives an explicit amount, put the plain ANNUAL number (no $/commas; "150k"→150000; a MONTHLY figure ×12) in "annual_salary" and leave "salary_basis" null. If instead pay should follow a statistic ("the department average", "median pay", "bottom/top of the band", "company average"), set "annual_salary" to 0 and "salary_basis" to exactly one of: ${SALARY_BASES.join(", ")} — do NOT compute it yourself. For a brand-new department with no pay history, a department statistic is fine: the system automatically uses the company figure. If no pay is given or implied at all, ask.
 - Return {"question":"..."} (ONE short question, no hires) only when something essential is missing or contradictory and not covered by the rules above. Otherwise return hires.`;
@@ -183,8 +183,7 @@ Rules:
       start_month,
       end_month,
       annual_salary: Math.round(annual_salary),
-      count: Math.max(1, Math.min(200, Number(h.count) || 1)),
-    };
+      count: Math.max(1, Math.min(200, Number(h.count) || 1)),    };
   }).filter((h) => h.annual_salary > 0);
   // Arrays are objects: carry a clarifying question alongside (route asks before adding).
   const question = typeof obj.question === "string" ? obj.question.trim().slice(0, 240) : "";

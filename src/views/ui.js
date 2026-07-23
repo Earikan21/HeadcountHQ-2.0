@@ -70,7 +70,7 @@ function navGroups(user, active, features = {}, modelNav = null) {
     if (features.planning) plan.push(I("/planning", "Planning", "planning"));
     groups.push({ label: "Model", items: plan });
   }
-  if (user.role === "finance_admin") groups.push({ label: "Admin", items: [I("/accounts", "Collaborators", "accounts"), I("/audit", "Audit", "audit")] });
+  if (user.role === "finance_admin") groups.push({ label: "Admin", items: [I("/accounts", "Collaborators", "accounts"), I("/integrations/google", "Google Sheets", "google"), I("/audit", "Audit", "audit")] });
   return groups;
 }
 

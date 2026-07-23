@@ -677,4 +677,27 @@ export const MIGRATIONS = [
       db.exec(`ALTER TABLE workspace_settings ADD COLUMN focus_department TEXT NOT NULL DEFAULT '';`);
     },
   },
+  {
+    name: "2026_07_16_031_google_sheets_connection",
+    up(db) {
+      // One-way live link to a Google Sheet (values + formatting) via the Sheets API.
+      // Delegated OAuth; the refresh token is stored ENCRYPTED (auth/secretbox.js).
+      db.exec(`
+        CREATE TABLE google_connections (
+          workspace_id      INTEGER PRIMARY KEY DEFAULT 1,
+          account_email     TEXT,
+          refresh_token_enc TEXT,
+          spreadsheet_id    TEXT,
+          spreadsheet_name  TEXT,
+          sheet_title       TEXT NOT NULL DEFAULT 'Headcount',
+          status            TEXT NOT NULL DEFAULT 'connected',
+          last_pushed_at    TEXT,
+          last_error        TEXT,
+          created_by        INTEGER,
+          created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
 ];

@@ -30,13 +30,19 @@ const round = (x, p = 6) => Math.round((Number(x) || 0) * 10 ** p) / 10 ** p;
  * is an A1 formula string ("=…") and only inputs (base, %, dates) are literals.
  * The matrix assumes it lives with its header at A1 (so the A1 formulas resolve).
  */
-export function modelMatrix(model) {
+export function modelMatrix(model, buckets = null) {
   const { cols, roster } = model;
+  // Columns are monthly by default, or period buckets ({ label, idxs }) when given —
+  // a quarter/year cell just sums the monthly factors of the months it spans, so the
+  // formulas stay linked to the base salary and still recompute in the sheet.
+  const cells = Array.isArray(buckets) && buckets.length
+    ? buckets
+    : cols.map((c, j) => ({ label: c.fullLabel, idxs: [j] }));
   const headers = ["Department", "Name", "Role", "Status", "Start", "End",
     "Annual Base", "Load %", "Bonus %", "Salary Growth %", "Cost per Hire", "Loaded Monthly"]
-    .concat(cols.map((c) => c.fullLabel));
+    .concat(cells.map((b) => b.label));
   const FIRST = 2;              // first data row (row 1 is the header)
-  const MONTH0 = 12;           // 0-based index of the first month column (M)
+  const MONTH0 = 12;           // 0-based index of the first period column (M)
 
   const rows = roster.map((r, i) => {
     const rowNum = FIRST + i;
@@ -46,15 +52,19 @@ export function modelMatrix(model) {
     const hireMonth = r.active.findIndex((a) => a > 0);
     const cph = Math.round(Number(r.costPerHire) || 0);
 
-    const months = cols.map((c, j) => {
-      const oneTime = cph && j === hireMonth ? cph : 0;
-      const recurring = (Number(r.monthlyCost[j]) || 0) - oneTime;
-      if (recurring <= 0 && !oneTime) return 0;
-      // factor: how much of L this month costs (proration × growth). Exact from the
-      // engine's own numbers, so no cost logic is re-derived in the sheet.
-      const factor = perBonusLoaded > 0 ? round(recurring / perBonusLoaded) : 0;
-      const term = factor ? `$L${rowNum}*${factor}` : "";
-      const expr = [term, oneTime ? String(oneTime) : ""].filter(Boolean).join("+");
+    const periodCells = cells.map((b) => {
+      let factorSum = 0, oneTimeSum = 0;
+      for (const j of b.idxs) {
+        const oneTime = cph && j === hireMonth ? cph : 0;
+        const recurring = (Number(r.monthlyCost[j]) || 0) - oneTime;
+        // factor: how much of L this month costs (proration × growth). Exact from the
+        // engine's own numbers, so no cost logic is re-derived in the sheet.
+        if (recurring > 0 && perBonusLoaded > 0) factorSum += recurring / perBonusLoaded;
+        oneTimeSum += oneTime;
+      }
+      factorSum = round(factorSum);
+      const term = factorSum ? `$L${rowNum}*${factorSum}` : "";
+      const expr = [term, oneTimeSum ? String(oneTimeSum) : ""].filter(Boolean).join("+");
       return expr ? "=" + expr : 0;
     });
 
@@ -63,20 +73,20 @@ export function modelMatrix(model) {
       r.startDate || "", r.endDate || "",
       Math.round(r.annualBase), Number(r.loadPct) || 0, Number(r.bonusPct) || 0,
       Number(r.growthPct) || 0, cph, loaded,
-    ].concat(months);
+    ].concat(periodCells);
   });
 
   const last = FIRST + roster.length - 1;
   const sum = (L) => (roster.length ? `=SUM(${L}${FIRST}:${L}${last})` : 0);
   const total = ["TOTAL", "", "", "", "", "", sum("G"), "", "", "", sum("K"), sum("L")]
-    .concat(cols.map((c, j) => sum(colLetter(MONTH0 + j))));
+    .concat(cells.map((b, j) => sum(colLetter(MONTH0 + j))));
 
   return { headers, rows, total };
 }
 
 /** Flatten to a plain 2D array: header row, data rows, then the TOTAL row. */
-export function modelMatrixCells(model) {
-  const { headers, rows, total } = modelMatrix(model);
+export function modelMatrixCells(model, buckets = null) {
+  const { headers, rows, total } = modelMatrix(model, buckets);
   return [headers, ...rows, total];
 }
 

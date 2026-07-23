@@ -18,6 +18,7 @@ import { registerExcelRoutes } from "./routes/excel.js";
 import { registerOrgRoutes } from "./routes/org.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerPnlRoutes } from "./routes/pnl.js";
+import { registerGoogleSheetsRoutes } from "./routes/gsheets.js";
 
 export function registerRoutes(router, deps = {}) {
   // Feature flags decide which enterprise areas exist at all (Directive 4.0).
@@ -41,6 +42,7 @@ export function registerRoutes(router, deps = {}) {
   registerExcelRoutes(router);
   registerAssistantRoutes(router);
   registerPnlRoutes(router);
+  registerGoogleSheetsRoutes(router);
 
   // Hidden-by-default areas (internal tool). Re-enable with FEATURE_<AREA>=true.
   if (features.requests) registerRequestRoutes(router);
