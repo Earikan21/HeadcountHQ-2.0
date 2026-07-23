@@ -104,3 +104,30 @@ test("the prompt explicitly licenses new/hypothetical departments and forbids re
   assert.match(seen, /only ADD/i, "and that the planner cannot remove people");
   assert.match(seen, /end_month/, "and how to set an end date");
 });
+
+test("an explicit count is preserved exactly (no off-by-one) and clamped to 1..200", async () => {
+  const out = await parseScenarioHires({
+    description: "add 9 SDRs to Sales at 120k", departments: ["Sales"], payStats: departmentPayStats(ROSTER), now: NOW,
+    client: stub({ hires: [{ department: "Sales", role: "SDR", start_month: "2027-01", annual_salary: 120000, count: 9 }] }),
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].count, 9, "exactly nine — not eight, not ten");
+  // absurd counts are clamped, never inflated
+  const big = await parseScenarioHires({
+    description: "x", departments: ["Sales"], payStats: departmentPayStats(ROSTER), now: NOW,
+    client: stub({ hires: [{ department: "Sales", role: "SDR", annual_salary: 120000, count: 9999 }] }),
+  });
+  assert.equal(big[0].count, 200);
+});
+
+test("the prompt tells the model to add EXACTLY the requested count and not re-add existing hires", async () => {
+  let seen = "";
+  await parseScenarioHires({
+    description: "add 9 SDRs", departments: ["Sales"], payStats: departmentPayStats(ROSTER), now: NOW,
+    planHiresContext: "This plan already includes these planned hires: 1× SDR in Sales at ~120000/yr.",
+    client: { configured: true, chat: async (_s, user) => { seen = user; return JSON.stringify({ hires: [] }); } },
+  });
+  assert.match(seen, /sum to EXACTLY/, "explicit-count instruction is present");
+  assert.match(seen, /A plain "add N" \/ "hire N" is NOT a total/, "add-N is distinguished from a total");
+  assert.match(seen, /mind the fencepost/, "ramp fencepost guard is present");
+});

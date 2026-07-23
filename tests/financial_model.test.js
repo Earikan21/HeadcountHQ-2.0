@@ -46,3 +46,19 @@ test("the budgets page links to the CSV export", async () => {
   const page = await (await c.get("/budgets")).text();
   assert.match(page, /href="\/budgets\/export\.csv"/);
 });
+
+test("?period=quarter exports quarterly columns instead of monthly", async () => {
+  const monthly = (await (await c.get("/budgets/export.csv")).text()).trim().split("\r\n")[0];
+  const quarterly = (await (await c.get("/budgets/export.csv?period=quarter")).text()).trim().split("\r\n")[0];
+  assert.match(monthly, /,Jan-\d{4}/, "monthly export has month columns");
+  assert.match(quarterly, /,Q1 '\d{2}/, "quarterly export has quarter columns");
+  assert.ok(!/,Jan-\d{4}/.test(quarterly), "and no month columns");
+  // fewer columns than monthly
+  assert.ok(quarterly.split(",").length < monthly.split(",").length);
+});
+
+test("?period=year exports yearly columns", async () => {
+  const yearly = (await (await c.get("/budgets/export.csv?period=year")).text()).trim().split("\r\n")[0];
+  assert.match(yearly, /,20\d{2}(,|$)/, "yearly export has year columns");
+  assert.ok(!/,Q1 '/.test(yearly) && !/,Jan-/.test(yearly));
+});

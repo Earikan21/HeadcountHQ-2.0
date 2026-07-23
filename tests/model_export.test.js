@@ -50,3 +50,20 @@ test("cells flatten to header + rows + total", () => {
   assert.equal(cells[0][0], "Department");
   assert.equal(cells[2][0], "TOTAL");
 });
+
+test("period buckets aggregate the month columns into quarters, still linked", () => {
+  const emp = [{ name: "A", employee_ext_id: "E1", department_name: "Sales", annual_salary: 120000, start_date: "2020-01-01", employment_status: "active" }];
+  const model = buildHeadcountModel({ employees: emp, loadedMultiplier: 1.2, start: { year: 2026, month0: 0 }, months: 12, now: new Date("2026-07-15") });
+  // one bucket per quarter of 2026
+  const buckets = [
+    { label: "Q1", idxs: [0, 1, 2] }, { label: "Q2", idxs: [3, 4, 5] },
+    { label: "Q3", idxs: [6, 7, 8] }, { label: "Q4", idxs: [9, 10, 11] },
+  ];
+  const { headers, rows } = modelMatrix(model, buckets);
+  // 12 label columns + 4 quarter columns
+  assert.equal(headers.length, 12 + 4);
+  assert.deepEqual(headers.slice(12), ["Q1", "Q2", "Q3", "Q4"]);
+  // a fully-ramped person costs $L each month → 3× per quarter, as a linked formula
+  const periodCells = rows[0].slice(12);
+  assert.deepEqual(periodCells, ["=$L2*3", "=$L2*3", "=$L2*3", "=$L2*3"]);
+});
